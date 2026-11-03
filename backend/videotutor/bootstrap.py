@@ -17,8 +17,16 @@ from typing import TYPE_CHECKING
 from videotutor.app.lifecycle import AppState, Lifecycle
 from videotutor.app.ports import Desktop, Locations
 from videotutor.app.setup import SetupService
+from videotutor.app.videos import VideoService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
+from videotutor.infra.captions.youtube import YouTubeCaptionDecoder
+from videotutor.infra.db.database import Database
+from videotutor.infra.db.repositories import (
+    SqliteTranscriptRepository,
+    SqliteVideoRepository,
+    SqliteWatchRepository,
+)
 from videotutor.infra.desktop import WindowsDesktop
 from videotutor.infra.http_server import HttpServer, bind_first_free
 from videotutor.infra.settings_store import JsonSettingsStore
@@ -53,11 +61,24 @@ class Application:
         self.lifecycle = Lifecycle()
         self.settings = JsonSettingsStore(locations.settings_file)
         self.tasks = TaskSupervisor()
-        self.setup = SetupService(product, locations, self.desktop, self.settings)
+        self.setup = SetupService(
+            product, locations, self.desktop, self.settings, self._database_read_only
+        )
+        self._db: Database | None = None
+        self._videos: VideoService | None = None
         self._runtime = RuntimeFile(locations.runtime_file)
         self._server: HttpServer | None = None
         self._tray: Tray | None = None
         self._quit = threading.Event()
+
+    @property
+    def videos(self) -> VideoService:
+        if self._videos is None:
+            raise RuntimeError("application not started")
+        return self._videos
+
+    def _database_read_only(self) -> bool:
+        return self._db is not None and self._db.read_only
 
     @property
     def url(self) -> str:
@@ -71,13 +92,31 @@ class Application:
         try:
             self.settings.load()
 
+            db, report = Database.open(self.locations.database_file)
+            self._db = db
+            self.lifecycle.add_stop_hook("database", db.close)
+            self._videos = VideoService(
+                SqliteVideoRepository(db),
+                SqliteTranscriptRepository(db),
+                SqliteWatchRepository(db),
+                YouTubeCaptionDecoder(),
+            )
+            if not db.read_only:
+                closed = self._videos.close_unfinished_sessions()
+                if closed:
+                    log.info("closed %d watch session(s) left open by the last run", closed)
+            log.info("database %s (schema %d)", db.path, report.version)
+
             self.tasks.start()
             self.lifecycle.add_stop_hook("tasks", self.tasks.shutdown)
 
             sock = bind_first_free(self.product.ports)
             port = sock.getsockname()[1]
             api = create_app(
-                ApiDeps(self.product, self.setup, self.activate, self.locations.web_dir), port
+                ApiDeps(
+                    self.product, self.setup, self._videos, self.activate, self.locations.web_dir
+                ),
+                port,
             )
             server = HttpServer(api, sock)
             self.lifecycle.add_stop_hook("http", server.stop)
@@ -185,6 +224,7 @@ def smoke_test(product: Product, locations: Locations) -> int:
 
         if app.tasks.submit("smoke-ping", ping).result(timeout=5) != "pong":
             problems.append("task supervisor round trip failed")
+        problems += _smoke_database(app.videos)
         if not locations.icon_file.exists():
             problems.append(f"missing {locations.icon_file}")
     finally:
@@ -196,3 +236,28 @@ def smoke_test(product: Product, locations: Locations) -> int:
         log.error("smoke test: %s", p)
     log.info("smoke test %s", "FAILED" if problems else "passed")
     return 1 if problems else 0
+
+
+def _smoke_database(videos: VideoService) -> list[str]:
+    """Open a video, store captions, read them back, follow a little playback."""
+    from datetime import UTC, datetime
+
+    from videotutor.domain.video import CaptionTrack, Platform, TrackKind, VideoRef
+    from videotutor.domain.watch import WatchEvent, WatchEventType, WatchState
+
+    ref = VideoRef(Platform.YOUTUBE, "smoketest00")
+    track = CaptionTrack(".en", "en", TrackKind.MANUAL)
+    opened = videos.open_video(ref, title="smoke", url="", duration_ms=10_000, tracks=[track])
+    body = json.dumps({"events": [{"tStartMs": 0, "dDurationMs": 1000, "segs": [{"utf8": "hi"}]}]})
+    videos.store_captions(ref, track, "json3", body)
+    problems: list[str] = []
+    if videos.transcript(ref).segments[0].text != "hi":
+        problems.append("transcript round trip failed")
+    now = datetime.now(UTC)
+    session = videos.record_events(
+        opened.session_id,
+        [WatchEvent(WatchEventType.PLAY, 0, now), WatchEvent(WatchEventType.PAUSE, 1000, now)],
+    )
+    if (session.state, session.watched_ms) != (WatchState.PAUSED, 1000):
+        problems.append(f"watch session ended as {session.state}/{session.watched_ms}")
+    return problems

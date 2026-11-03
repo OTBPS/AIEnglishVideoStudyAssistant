@@ -69,6 +69,7 @@ def resolve(app_name: str) -> Locations:
         icon_file=pkg / "assets" / "app.ico",
         settings_file=home / "settings.json",
         runtime_file=home / "runtime.json",
+        database_file=home / "data" / "tutor.db",
     )
 
 

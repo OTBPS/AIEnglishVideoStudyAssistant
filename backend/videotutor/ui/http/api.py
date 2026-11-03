@@ -1,24 +1,27 @@
-"""HTTP routes. Thin: parse the request, call an app service, shape the reply.
+"""Assembles the HTTP application: security guard, routers, error mapping, static pages.
 
-API compatibility: every route lives under /api and the protocol number in
-/api/health (from product.toml) tells the extension what it is talking to.
-See docs/ARCHITECTURE.md before changing a response shape.
+Routes stay thin -- parse, call an app service, shape the reply -- and live in
+routes/<area>.py. API compatibility: every route is under /api, and the
+protocol number in /api/health (from product.toml) tells the extension what it
+is talking to. See docs/ARCHITECTURE.md before changing a response shape.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from videotutor.app.errors import InvalidInputError, NotFoundError, StorageReadOnlyError
 from videotutor.app.setup import SetupService
+from videotutor.app.videos import VideoService
 from videotutor.core.product import Product
 
+from .routes import system, videos
 from .security import local_only_guard
 
 
@@ -26,8 +29,16 @@ from .security import local_only_guard
 class ApiDeps:
     product: Product
     setup: SetupService
+    videos: VideoService
     on_activate: Callable[[], None]
     web_dir: Path
+
+
+_ERRORS: dict[type[Exception], int] = {
+    NotFoundError: 404,
+    StorageReadOnlyError: 409,
+    InvalidInputError: 422,
+}
 
 
 def create_app(deps: ApiDeps, port: int) -> FastAPI:
@@ -37,24 +48,15 @@ def create_app(deps: ApiDeps, port: int) -> FastAPI:
     )
     app.middleware("http")(local_only_guard(port, product.extension_origin))
 
-    @app.get("/api/health")
-    def health() -> dict[str, Any]:
-        return {"app": product.name, "version": product.version, "protocol": product.protocol}
+    for exc_type, status in _ERRORS.items():
 
-    @app.post("/api/activate")
-    def activate() -> dict[str, bool]:
-        """A second launch asks the running instance to show itself."""
-        deps.on_activate()
-        return {"ok": True}
+        def handler(_: Request, exc: Exception, status: int = status) -> JSONResponse:
+            return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status)
 
-    @app.get("/api/setup/info")
-    def setup_info() -> dict[str, Any]:
-        return asdict(deps.setup.info())
+        app.add_exception_handler(exc_type, handler)
 
-    @app.post("/api/setup/open-extension-folder")
-    def open_extension_folder() -> dict[str, bool]:
-        deps.setup.open_extension_folder()
-        return {"ok": True}
+    app.include_router(system.router(product, deps.setup, deps.on_activate))
+    app.include_router(videos.router(deps.videos))
 
     @app.get("/", include_in_schema=False)
     def index() -> RedirectResponse:

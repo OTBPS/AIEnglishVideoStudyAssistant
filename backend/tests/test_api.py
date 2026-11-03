@@ -8,12 +8,16 @@ from fastapi.testclient import TestClient
 from videotutor.app.ports import Locations
 from videotutor.app.setup import SetupService
 from videotutor.core.product import Product
+from videotutor.infra.db.database import Database
 from videotutor.infra.settings_store import JsonSettingsStore
 from videotutor.ui.http.api import ApiDeps, create_app
 
 from .conftest import FakeDesktop
+from .test_videos import json3, make_service
 
 PORT = 8765
+VIDEO = "iG9CE55wbtY"
+MANUAL = {"track_id": ".en", "language": "en", "kind": "manual", "name": "English"}
 
 
 @pytest.fixture
@@ -22,17 +26,110 @@ def activations() -> list[int]:
 
 
 @pytest.fixture
+def database(locations: Locations) -> Iterator[Database]:
+    db, _ = Database.open(locations.database_file)
+    yield db
+    db.close()
+
+
+@pytest.fixture
 def client(
-    product: Product, locations: Locations, desktop: FakeDesktop, activations: list[int]
+    product: Product,
+    locations: Locations,
+    desktop: FakeDesktop,
+    activations: list[int],
+    database: Database,
 ) -> Iterator[TestClient]:
     store = JsonSettingsStore(locations.settings_file)
     store.load()
-    setup = SetupService(product, locations, desktop, store)
-    app = create_app(
-        ApiDeps(product, setup, lambda: activations.append(1), locations.web_dir), PORT
+    setup = SetupService(product, locations, desktop, store, lambda: database.read_only)
+    deps = ApiDeps(
+        product, setup, make_service(database), lambda: activations.append(1), locations.web_dir
     )
-    with TestClient(app, base_url=f"http://127.0.0.1:{PORT}") as c:
+    with TestClient(create_app(deps, PORT), base_url=f"http://127.0.0.1:{PORT}") as c:
         yield c
+
+
+def _open(client: TestClient, tracks: list[dict[str, str]] | None = None) -> dict[str, object]:
+    resp = client.post(
+        "/api/videos/open",
+        json={
+            "platform": "youtube",
+            "external_id": VIDEO,
+            "title": "A talk",
+            "url": f"https://www.youtube.com/watch?v={VIDEO}",
+            "duration_ms": 60000,
+            "tracks": [MANUAL] if tracks is None else tracks,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body: dict[str, object] = resp.json()
+    return body
+
+
+def test_video_flow_end_to_end(client: TestClient) -> None:
+    opened = _open(client)
+    assert opened["wanted_track"] == MANUAL and opened["transcript"] is None
+
+    put = client.put(
+        f"/api/videos/youtube/{VIDEO}/captions",
+        json={"track": MANUAL, "format": "json3", "body": json3((0, 1500, "Hello  there"))},
+    )
+    assert put.json() == {
+        "language": "en",
+        "kind": "manual",
+        "source": "youtube-json3",
+        "segment_count": 1,
+    }
+    transcript = client.get(f"/api/videos/youtube/{VIDEO}/transcript").json()
+    assert transcript["segments"] == [{"start_ms": 0, "end_ms": 1500, "text": "Hello there"}]
+    assert _open(client)["wanted_track"] is None
+
+    sid = opened["session_id"]
+    session = client.post(
+        f"/api/sessions/{sid}/events",
+        json={"events": [{"type": "play", "position_ms": 0}, {"type": "pause", "position_ms": 0}]},
+    ).json()
+    assert session["state"] == "paused"
+    assert client.post(f"/api/sessions/{sid}/close").json()["state"] == "closed"
+
+    recent = client.get("/api/videos/recent").json()
+    assert recent[0]["external_id"] == VIDEO and recent[0]["has_transcript"] is True
+
+
+def test_video_errors_map_to_status_codes(client: TestClient) -> None:
+    assert client.get(f"/api/videos/youtube/{VIDEO}/transcript").status_code == 404
+    assert client.get("/api/videos/youtube/bad id!/transcript").status_code == 422
+    assert client.get("/api/videos/vimeo/x/transcript").status_code == 422
+    assert client.post("/api/sessions/12345/close").status_code == 404
+    _open(client)
+    bad = client.put(
+        f"/api/videos/youtube/{VIDEO}/captions",
+        json={"track": MANUAL, "format": "json3", "body": "not json"},
+    )
+    assert bad.status_code == 422 and bad.json()["error"] == "InvalidInputError"
+    too_many = client.post("/api/sessions/1/events", json={"events": []})
+    assert too_many.status_code == 422
+
+
+def test_read_only_database_answers_409(
+    product: Product, locations: Locations, desktop: FakeDesktop
+) -> None:
+    from videotutor.infra.db.migrations import MIGRATIONS, Migration
+
+    newer = (*MIGRATIONS, Migration(len(MIGRATIONS) + 1, "future", "CREATE TABLE f (x);"))
+    Database.open(locations.database_file, newer)[0].close()
+    db, report = Database.open(locations.database_file)
+    assert report.read_only
+    store = JsonSettingsStore(locations.settings_file)
+    store.load()
+    setup = SetupService(product, locations, desktop, store, lambda: db.read_only)
+    deps = ApiDeps(product, setup, make_service(db), lambda: None, locations.web_dir)
+    with TestClient(create_app(deps, PORT), base_url=f"http://127.0.0.1:{PORT}") as c:
+        assert c.get("/api/setup/info").json()["database_read_only"] is True
+        resp = c.post("/api/videos/open", json={"platform": "youtube", "external_id": VIDEO})
+        assert resp.status_code == 409
+    db.close()
 
 
 def test_health_reports_product(client: TestClient, product: Product) -> None:

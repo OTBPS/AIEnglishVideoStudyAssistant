@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from videotutor.core.product import Product
@@ -17,12 +18,19 @@ class SetupInfo:
     home_dir: str
     first_run_done: bool
     settings_read_only: bool
+    database_read_only: bool
 
 
 class SetupService:
     def __init__(
-        self, product: Product, locations: Locations, desktop: Desktop, settings: SettingsStore
+        self,
+        product: Product,
+        locations: Locations,
+        desktop: Desktop,
+        settings: SettingsStore,
+        database_read_only: Callable[[], bool] = lambda: False,
     ) -> None:
+        self._database_read_only = database_read_only
         self._product = product
         self._loc = locations
         self._desktop = desktop
@@ -35,6 +43,7 @@ class SetupService:
             home_dir=str(self._loc.home),
             first_run_done=self._settings.current().first_run_done,
             settings_read_only=self._settings.read_only,
+            database_read_only=self._database_read_only(),
         )
 
     def open_extension_folder(self) -> None:

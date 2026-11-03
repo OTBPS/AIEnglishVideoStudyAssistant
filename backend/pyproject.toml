@@ -91,13 +91,14 @@ root_package = "videotutor"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: bootstrap > ui > infra > app > core"
+name = "Layers: bootstrap > ui > infra > app > domain > core"
 type = "layers"
 layers = [
     "videotutor.bootstrap",
     "videotutor.ui",
     "videotutor.infra",
     "videotutor.app",
+    "videotutor.domain",
     "videotutor.core",
 ]
 
@@ -112,4 +113,11 @@ name = "core stays standard-library only"
 type = "forbidden"
 source_modules = ["videotutor.core"]
 forbidden_modules = ["fastapi", "pydantic", "uvicorn", "pystray", "PIL"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "domain is pure: no frameworks, no I/O libraries"
+type = "forbidden"
+source_modules = ["videotutor.domain"]
+forbidden_modules = ["fastapi", "pydantic", "uvicorn", "pystray", "PIL", "sqlite3", "urllib"]
 allow_indirect_imports = true
