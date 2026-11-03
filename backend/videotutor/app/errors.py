@@ -50,3 +50,37 @@ class LlmOutputError(LlmError):
     """The model answered, but not in the shape we asked for."""
 
     user_message = "AI 返回的内容无法使用，请重试。"
+
+
+# ---------------------------------------------------------------- speech recognition (M4)
+class Cancelled(RuntimeError):
+    """Work stopped because it was cancelled, timed out, or the app is quitting."""
+
+
+class SpeechError(RuntimeError):
+    """Base for download / recognition failures; `user_message` is shown in the UI."""
+
+    user_message = "语音识别出错了，详细信息在日志里。"
+
+    def __init__(self, detail: str = "", user_message: str | None = None) -> None:
+        super().__init__(detail or self.user_message)
+        if user_message is not None:
+            self.user_message = user_message
+
+
+class SpeechNotReadyError(SpeechError):
+    user_message = "还没有安装语音识别模型：请在 VideoTutor 主页的「语音识别」里安装。"
+
+
+class DownloadError(SpeechError):
+    user_message = "下载失败：网络连不上或中断了，请稍后重试（已下载的部分会保留）。"
+
+
+class DiskFullError(SpeechError):
+    user_message = "磁盘空间不足，请清理后重试。"
+
+
+class GpuUnavailableError(SpeechError):
+    """The NVIDIA runtime could not run the model; recognition falls back to the CPU."""
+
+    user_message = "显卡加速不可用，已改用 CPU。"

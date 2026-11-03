@@ -7,6 +7,8 @@ to fake it in tests -- not speculatively.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,7 @@ from typing import Any, Protocol
 from videotutor.domain.listening import ListeningIssue
 from videotutor.domain.prewatch import Gloss, PrewatchGuide
 from videotutor.domain.review import Card, Grade, SrsState
+from videotutor.domain.speech import Component, Word
 from videotutor.domain.transcript import RawCue, Transcript
 from videotutor.domain.video import TrackKind, Video, VideoRef
 from videotutor.domain.vocab import WordStatus
@@ -41,6 +44,7 @@ class Locations:
     runtime_file: Path
     database_file: Path
     lexicon_file: Path
+    cache_dir: Path  # disposable working files (downloaded audio); safe to delete
 
 
 class Desktop(Protocol):
@@ -235,3 +239,78 @@ class ListeningIssueRepository(Protocol):
         ...
 
     def for_video(self, video_id: int) -> list[ListeningIssue]: ...
+
+
+# ---------------------------------------------------------------- speech recognition (M4)
+class Downloader(Protocol):
+    def download(
+        self,
+        urls: Sequence[str],
+        dest: Path,
+        *,
+        size: int | None,
+        sha256: str | None,
+        headers: Mapping[str, str],
+        progress: Callable[[int], None],
+        stop: threading.Event,
+    ) -> None:
+        """Fetch `dest`, resuming a previous partial download and trying each URL
+        in turn. Raises app.errors.DownloadError, or Cancelled once `stop` is set.
+        `progress` receives the number of bytes on disk so far."""
+        ...
+
+
+class ComponentStore(Protocol):
+    """Where downloaded components live on disk."""
+
+    def is_installed(self, component: Component) -> bool: ...
+
+    def directory(self, component: Component) -> Path: ...
+
+    def install(
+        self,
+        component: Component,
+        downloader: Downloader,
+        progress: Callable[[int], None],
+        stop: threading.Event,
+    ) -> None:
+        """Download, verify and unpack; the component appears only when complete.
+        `progress` receives the bytes downloaded so far across all its files."""
+        ...
+
+    def remove(self, component: Component) -> None: ...
+
+    def free_bytes(self) -> int: ...
+
+
+@dataclass(frozen=True)
+class NvidiaGpu:
+    name: str
+    memory_mb: int
+    driver: str
+
+
+class HardwareProbe(Protocol):
+    def nvidia_gpu(self) -> NvidiaGpu | None: ...
+
+
+@dataclass(frozen=True)
+class RecognitionRequest:
+    audio: Path
+    model_dir: Path
+    device: str  # "cpu" | "cuda"
+    gpu_runtime_dir: Path | None  # the NVIDIA DLLs, when device is "cuda"
+
+
+class SpeechRecognizer(Protocol):
+    def recognize(
+        self,
+        request: RecognitionRequest,
+        progress: Callable[[int, int], None],
+        stop: threading.Event,
+    ) -> list[Word]:
+        """All recognized words, in order. `progress(position_ms, duration_ms)`.
+
+        Raises GpuUnavailableError if the model cannot be loaded on the GPU,
+        SpeechError for any other failure, Cancelled once `stop` is set."""
+        ...

@@ -7,8 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from videotutor.domain.transcript import Transcript, normalize
-from videotutor.domain.video import CaptionTrack, Video, VideoRef, choose_track
+from videotutor.domain.transcript import RawCue, Transcript, normalize
+from videotutor.domain.video import CaptionTrack, TrackKind, Video, VideoRef, choose_track
 from videotutor.domain.watch import WatchEvent, WatchSession
 
 from .errors import InvalidInputError, NotFoundError
@@ -89,6 +89,14 @@ class VideoService:
             track.kind,
             ref.external_id,
         )
+        return info
+
+    def store_recognized(self, ref: VideoRef, cues: list[RawCue], source: str) -> TranscriptInfo:
+        """Save a transcript made by local speech recognition."""
+        video = self.require_video(ref)
+        transcript = Transcript("en", TrackKind.ASR, source, normalize(cues))
+        info = self._transcripts.save(video.id, transcript, self._now())
+        log.info("stored %d recognized segments for %s", info.segment_count, ref.external_id)
         return info
 
     def transcript(self, ref: VideoRef) -> Transcript:

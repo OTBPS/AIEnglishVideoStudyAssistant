@@ -56,6 +56,15 @@ def home_dir(app_name: str) -> Path:
     return Path(base) / app_name
 
 
+def worker_command() -> tuple[list[str], Path | None]:
+    """How to start this program as the speech-recognition worker, and where."""
+    if is_frozen():
+        return [sys.executable, "--asr-worker"], None
+    # python.exe, not pythonw: the worker talks over stdout. Run from backend/
+    # so `-m videotutor` resolves to this checkout.
+    return [sys.executable, "-m", "videotutor", "--asr-worker"], package_dir().parent
+
+
 def per_home_name(base: str, home: Path) -> str:
     """Name a per-installation resource (instance mutex, credential-store service).
 
@@ -88,9 +97,10 @@ def resolve(app_name: str) -> Locations:
         runtime_file=home / "runtime.json",
         database_file=home / "data" / "tutor.db",
         lexicon_file=pkg / "assets" / "lexicon_en.tsv.gz",
+        cache_dir=home / "cache",
     )
 
 
 def ensure_dirs(loc: Locations) -> None:
-    for d in (loc.data_dir, loc.logs_dir, loc.models_dir):
+    for d in (loc.data_dir, loc.logs_dir, loc.models_dir, loc.cache_dir):
         d.mkdir(parents=True, exist_ok=True)

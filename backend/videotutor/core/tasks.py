@@ -244,11 +244,30 @@ class TaskSupervisor:
     def run_blocking[T](
         self, name: str, fn: Callable[[], T], *, timeout: Timeout = USE_DEFAULT
     ) -> TaskHandle[T]:
-        """Run a blocking callable in a daemon thread, supervised like any task."""
+        """Run a blocking callable in a daemon thread, supervised like any task.
+
+        A cancelled or timed-out call keeps running until it returns (Python
+        cannot interrupt a thread); its result is discarded. Work that can stop
+        early -- a download, a subprocess -- should use run_cancellable().
+        """
+        return self._in_thread(name, lambda _stop: fn(), timeout)
+
+    def run_cancellable[T](
+        self, name: str, fn: Callable[[threading.Event], T], *, timeout: Timeout = USE_DEFAULT
+    ) -> TaskHandle[T]:
+        """Like run_blocking(), but fn receives an Event that is set as soon as
+        the task is cancelled, times out, or the supervisor shuts down. fn
+        checks it between steps (or kills its subprocess) and returns promptly."""
+        return self._in_thread(name, fn, timeout)
+
+    def _in_thread[T](
+        self, name: str, fn: Callable[[threading.Event], T], timeout: Timeout
+    ) -> TaskHandle[T]:
         loop = self._require_loop()
 
         async def work() -> T:
             fut: asyncio.Future[T] = loop.create_future()
+            stop = threading.Event()
 
             def deliver(outcome: Callable[[], None]) -> None:
                 # RuntimeError: loop already closed, the result is abandoned.
@@ -257,7 +276,7 @@ class TaskSupervisor:
 
             def target() -> None:
                 try:
-                    value = fn()
+                    value = fn(stop)
                 except BaseException as exc:  # noqa: BLE001 -- forwarded to the awaiting task
                     # partial binds exc now; a lambda would see it deleted.
                     deliver(functools.partial(_set_exception, fut, exc))
@@ -265,7 +284,10 @@ class TaskSupervisor:
                     deliver(functools.partial(_set_result, fut, value))
 
             threading.Thread(target=target, name=f"task:{name}", daemon=True).start()
-            return await fut
+            try:
+                return await fut
+            finally:
+                stop.set()  # cancelled, timed out or done: tell the thread either way
 
         return self.submit(name, work, timeout=timeout)
 

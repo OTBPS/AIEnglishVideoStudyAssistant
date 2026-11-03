@@ -14,6 +14,10 @@ dependencies = [
     "anthropic>=2.4",
     "keyring>=25.7",
     "fsrs>=6.0",
+    # Speech recognition (M4b). Only the worker process imports these.
+    # faster-whisper 1.2.1 passes av.open(metadata_errors=...), which PyAV 17+ removed.
+    "faster-whisper==1.2.1",
+    "av>=11,<17",
 ]
 
 [dependency-groups]
@@ -92,7 +96,7 @@ strict = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["pystray.*"]
+module = ["pystray.*", "faster_whisper.*", "ctranslate2.*", "av.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- layers

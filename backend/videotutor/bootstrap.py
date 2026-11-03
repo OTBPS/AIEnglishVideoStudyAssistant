@@ -23,12 +23,17 @@ from videotutor.app.ports import Desktop, Locations, SecretStore
 from videotutor.app.prewatch import PrewatchService
 from videotutor.app.review import ReviewService
 from videotutor.app.setup import SetupService
+from videotutor.app.speech import SpeechSetup
+from videotutor.app.transcription import TranscriptionService
 from videotutor.app.videos import VideoService
 from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
 from videotutor.infra import paths
+from videotutor.infra.asr import catalog
+from videotutor.infra.asr.recognizer import WorkerRecognizer
 from videotutor.infra.captions.registry import CaptionDecoders
+from videotutor.infra.components_store import FileComponentStore
 from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
     SqliteAttemptRepository,
@@ -41,6 +46,8 @@ from videotutor.infra.db.repositories import (
     SqliteWordStatusRepository,
 )
 from videotutor.infra.desktop import WindowsDesktop
+from videotutor.infra.downloads import HttpDownloader
+from videotutor.infra.hardware import SystemHardware
 from videotutor.infra.http_server import HttpServer, bind_first_free
 from videotutor.infra.lexicon import FileLexicon
 from videotutor.infra.llm.provider import ConfiguredLanguageModelProvider
@@ -174,6 +181,23 @@ class Application:
             )
             comprehension = ComprehensionService(self._videos, prewatch_repo, attempts, models)
             llm_settings = LlmSettingsService(self.settings, self.secrets, models)
+            downloader = HttpDownloader(f"{self.product.name}/{self.product.version}")
+            speech = SpeechSetup(
+                catalog.SPEECH_MODELS,
+                catalog.GPU_RUNTIME,
+                FileComponentStore(self.locations.models_dir),
+                downloader,
+                SystemHardware(),
+                self.tasks,
+            )
+            transcription = TranscriptionService(
+                self._videos,
+                speech,
+                downloader,
+                WorkerRecognizer(*paths.worker_command()),
+                self.tasks,
+                self.locations.cache_dir,
+            )
 
             sock = bind_first_free(self.product.ports)
             port = sock.getsockname()[1]
@@ -189,6 +213,8 @@ class Application:
                     listening=ListeningService(self._videos, SqliteListeningIssueRepository(db)),
                     settings=self.settings,
                     llm_settings=llm_settings,
+                    speech=speech,
+                    transcription=transcription,
                     tasks=self.tasks,
                     on_activate=self.activate,
                     web_dir=self.locations.web_dir,

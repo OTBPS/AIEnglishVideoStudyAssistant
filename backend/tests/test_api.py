@@ -13,9 +13,12 @@ from videotutor.app.ports import Locations
 from videotutor.app.prewatch import PrewatchService
 from videotutor.app.review import ReviewService
 from videotutor.app.setup import SetupService
+from videotutor.app.speech import SpeechSetup
+from videotutor.app.transcription import TranscriptionService
 from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
+from videotutor.infra.components_store import FileComponentStore
 from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
     SqliteAttemptRepository,
@@ -29,6 +32,7 @@ from videotutor.infra.srs import FsrsScheduler
 from videotutor.ui.http.api import ApiDeps, create_app
 
 from .conftest import FakeDesktop, FakeLanguageModel, FixedModelProvider, InMemorySecretStore
+from .speech_fakes import MODELS, RUNTIME, FakeDownloader, FakeHardware, FakeRecognizer
 from .test_videos import json3, make_service
 from .test_vocab import LEXICON
 
@@ -87,6 +91,13 @@ def build_deps(
         vocabulary=vocabulary,
         prefetch_gloss=prewatch.prefetch_gloss,
     )
+    downloader = FakeDownloader()
+    speech = SpeechSetup(
+        MODELS, RUNTIME, FileComponentStore(locations.models_dir), downloader, FakeHardware(), tasks
+    )
+    transcription = TranscriptionService(
+        videos, speech, downloader, FakeRecognizer(), tasks, locations.cache_dir
+    )
     return ApiDeps(
         product=product,
         setup=SetupService(product, locations, desktop, store, lambda: database.read_only),
@@ -98,6 +109,8 @@ def build_deps(
         listening=ListeningService(videos, SqliteListeningIssueRepository(database)),
         settings=store,
         llm_settings=LlmSettingsService(store, InMemorySecretStore(), models),
+        speech=speech,
+        transcription=transcription,
         tasks=tasks,
         on_activate=on_activate,
         web_dir=locations.web_dir,
@@ -415,3 +428,56 @@ def test_missed_line_replays_and_counts(client: TestClient) -> None:
         client.post(url, json={"position_ms": 60000}).status_code == 404
     )  # nothing was said there
     assert [i["count"] for i in client.get(url).json()] == [3]
+
+
+# ---------------------------------------------------------------- speech recognition
+BV = "BV1xx411c7mD"
+AUDIO_URL = "https://upos-sz-mirrorcos.bilivideo.com/x/1-30216.m4s?e=1"
+
+
+def _wait_for(
+    client: TestClient, url: str, done: Callable[[dict[str, object]], bool]
+) -> dict[str, object]:
+    import time
+
+    for _ in range(250):
+        body = client.get(url).json()
+        if body is not None and done(body):
+            return body  # type: ignore[no-any-return]
+        time.sleep(0.02)
+    raise AssertionError(f"{url} never reached the expected state")
+
+
+def test_install_a_model_then_transcribe_a_video(client: TestClient) -> None:
+    speech = client.get("/api/speech").json()
+    assert speech["ready"] is False and speech["device"] is None and speech["gpu"]["name"] is None
+    small = next(c for c in speech["components"] if c["id"] == "model-small")
+    assert small["recommended"] and small["status"] == "not_installed"
+
+    client.post("/api/videos/open", json={"platform": "bilibili", "external_id": BV, "title": "b"})
+    url = f"/api/videos/bilibili/{BV}/transcription"
+    r = client.post(url, json={"audio_urls": [AUDIO_URL], "duration_ms": 1000})
+    assert r.status_code == 424 and "主页" in r.json()["detail"]
+
+    assert client.post("/api/speech/components/model-small/install").status_code == 200
+    _wait_for(client, "/api/speech", lambda b: b["ready"] is True)
+    assert client.get(url).json() is None
+
+    r = client.post(url, json={"audio_urls": [AUDIO_URL], "duration_ms": 1000})
+    assert r.status_code == 200 and r.json()["status"] in (
+        "queued",
+        "downloading",
+        "recognizing",
+        "done",
+    )
+    job = _wait_for(client, url, lambda b: b["status"] == "done")
+    assert job["transcript"]["kind"] == "asr" and job["model"] == "model-small"
+    assert client.get(f"/api/videos/bilibili/{BV}/transcript").json()["kind"] == "asr"
+    assert client.delete(url).json()["status"] == "done"  # nothing left to cancel
+
+    assert client.post(url, json={"audio_urls": ["https://evil.example/a"]}).status_code == 422
+    assert client.post(url, json={"audio_urls": []}).status_code == 422
+    assert client.post("/api/speech/components/nope/install").status_code == 404
+    assert client.post("/api/speech/components/model-small/cancel").json()["status"] == "installed"
+    assert client.delete("/api/speech/components/model-small").json()["status"] == "not_installed"
+    assert client.delete(f"/api/videos/bilibili/{BV}-p2/transcription").json() is None

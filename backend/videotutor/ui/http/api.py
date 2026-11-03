@@ -18,11 +18,14 @@ from fastapi.staticfiles import StaticFiles
 
 from videotutor.app.comprehension import ComprehensionService
 from videotutor.app.errors import (
+    DiskFullError,
     InvalidInputError,
     LlmError,
     LlmNotConfiguredError,
     LlmUnavailableError,
     NotFoundError,
+    SpeechError,
+    SpeechNotReadyError,
     StorageReadOnlyError,
 )
 from videotutor.app.listening import ListeningService
@@ -31,12 +34,14 @@ from videotutor.app.prewatch import PrewatchService
 from videotutor.app.review import ReviewService
 from videotutor.app.settings import SettingsStore
 from videotutor.app.setup import SetupService
+from videotutor.app.speech import SpeechSetup
+from videotutor.app.transcription import TranscriptionService
 from videotutor.app.videos import VideoService
 from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor, TaskTimeout
 
-from .routes import learning, listening, review, settings, system, videos
+from .routes import learning, listening, review, settings, speech, system, videos
 from .security import local_only_guard
 
 
@@ -52,6 +57,8 @@ class ApiDeps:
     listening: ListeningService
     settings: SettingsStore
     llm_settings: LlmSettingsService
+    speech: SpeechSetup
+    transcription: TranscriptionService
     tasks: TaskSupervisor
     on_activate: Callable[[], None]
     web_dir: Path
@@ -66,13 +73,17 @@ _ERRORS: dict[type[Exception], int] = {
     LlmUnavailableError: 503,
     LlmError: 502,
     TaskTimeout: 504,
+    # Not 409: the extension reads 409 as "database is read-only".
+    SpeechNotReadyError: 424,
+    DiskFullError: 507,
+    SpeechError: 502,
 }
 
 
 def _detail(exc: Exception) -> str:
     # Language-model errors carry a message written for the learner; the raw
     # provider text stays in the log.
-    return exc.user_message if isinstance(exc, LlmError) else str(exc)
+    return exc.user_message if isinstance(exc, LlmError | SpeechError) else str(exc)
 
 
 def create_app(deps: ApiDeps, port: int) -> FastAPI:
@@ -106,6 +117,7 @@ def create_app(deps: ApiDeps, port: int) -> FastAPI:
     app.include_router(review.router(deps.review, deps.comprehension, deps.tasks))
     app.include_router(listening.router(deps.listening))
     app.include_router(settings.router(deps.settings, deps.llm_settings, deps.tasks))
+    app.include_router(speech.router(deps.speech, deps.transcription))
 
     @app.get("/", include_in_schema=False)
     def index() -> RedirectResponse:

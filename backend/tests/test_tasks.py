@@ -124,6 +124,30 @@ def test_blocking_failure_and_timeout(sup: TaskSupervisor) -> None:
     release.set()  # the abandoned thread finishing late must not break anything
 
 
+@pytest.mark.parametrize("how", ["cancel", "timeout", "shutdown"])
+def test_cancellable_work_is_told_to_stop(how: str) -> None:
+    s = TaskSupervisor(default_timeout=5)
+    s.start()
+    stopped = threading.Event()
+
+    def work(stop: threading.Event) -> None:
+        if stop.wait(5):
+            stopped.set()
+
+    h = s.run_cancellable("dl", work, timeout=0.05 if how == "timeout" else None)
+    _wait_state(h, TaskState.TIMED_OUT if how == "timeout" else TaskState.RUNNING)
+    if how == "cancel":
+        h.cancel()
+    elif how == "shutdown":
+        s.shutdown(grace=2)
+    assert stopped.wait(2)
+    s.shutdown(grace=2)
+
+
+def test_cancellable_work_finishing_normally(sup: TaskSupervisor) -> None:
+    assert sup.run_cancellable("ok", lambda stop: stop.is_set()).result(timeout=2) is False
+
+
 def test_list_and_prune(sup: TaskSupervisor) -> None:
     async def ok() -> None:
         return None

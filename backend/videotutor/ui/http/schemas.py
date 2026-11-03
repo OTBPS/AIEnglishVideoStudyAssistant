@@ -264,3 +264,51 @@ class ListeningIssueOut(BaseModel):
     text: str
     count: int
     replay_from_ms: int
+
+
+# ---------------------------------------------------------------- speech recognition (M4)
+MAX_AUDIO_URL_CHARS = 4000
+
+
+class ComponentOut(BaseModel):
+    id: str
+    kind: str
+    title: str
+    description: str
+    download_bytes: int
+    status: str  # not_installed | installing | installed | failed
+    downloaded_bytes: int
+    error: str | None
+    recommended: bool
+
+
+class GpuOut(BaseModel):
+    name: str | None
+    memory_mb: int | None
+    usable: bool
+    failure: str | None
+
+
+class SpeechOut(BaseModel):
+    ready: bool
+    model: str | None
+    device: str | None
+    gpu: GpuOut
+    components: list[ComponentOut]
+
+
+class TranscriptionIn(BaseModel):
+    audio_urls: list[str] = Field(min_length=1, max_length=6)
+    duration_ms: int | None = Field(default=None, ge=0, le=48 * 3600 * 1000)
+
+    def checked_urls(self) -> list[str]:
+        return [u for u in self.audio_urls if 0 < len(u) <= MAX_AUDIO_URL_CHARS]
+
+
+class TranscriptionOut(BaseModel):
+    status: str  # queued | downloading | recognizing | done | failed | cancelled
+    progress: float
+    model: str | None
+    device: str | None
+    error: str | None
+    transcript: TranscriptInfoOut | None

@@ -3,6 +3,7 @@
     --no-tray      run in the foreground without a tray icon (development)
     --no-browser   do not open the home page (used by the autostart shortcut)
     --smoke-test   start headless, self-check, exit 0/1 (used by tools/build.py)
+    --asr-worker   speech-recognition worker process (started by the app itself)
 
 Only standard-library modules are imported at the top: a broken install must
 still be able to report that it is broken.
@@ -56,6 +57,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if (sys.argv[1:] if argv is None else argv) == ["--asr-worker"]:
+        # A child of the running app, talking JSON over its pipes: no logging
+        # setup, no single-instance check, no dialogs (see infra/asr/worker.py).
+        from videotutor.infra.asr import worker
+
+        return worker.main()
     streams = StdStreams()
     try:
         product = load_product(paths.product_file())
