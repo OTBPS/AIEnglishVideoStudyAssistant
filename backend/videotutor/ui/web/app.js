@@ -109,6 +109,87 @@ async function setupLevel() {
   $("auto-prewatch").onchange = (ev) => save({ auto_prewatch: ev.target.checked });
 }
 
+// ------------------------------------------------------------ step 4: speech recognition
+const SPEECH_POLL_MS = 1500;
+let speechTimer = null;
+
+function gb(bytes) {
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+}
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "text") node.textContent = v; // never innerHTML
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v);
+  }
+  node.append(...children.filter(Boolean));
+  return node;
+}
+
+function hardwareText(s) {
+  const g = s.gpu;
+  const using = s.ready ? ` 现在会用「${s.model}」在 ${s.device === "cuda" ? "显卡" : "CPU"} 上识别。` : "";
+  if (!g.name) return `没有检测到 NVIDIA 显卡，识别会用 CPU（标准模型识别 10 分钟的视频大约要 2 分钟）。${using}`;
+  const mem = g.memory_mb ? `，${(g.memory_mb / 1024).toFixed(0)} GB 显存` : "";
+  const fail = g.failure ? ` 上次显卡加速没能运行，已改用 CPU（${g.failure.slice(0, 120)}）。` : "";
+  return `检测到 NVIDIA 显卡：${g.name}${mem}。${fail}${using}`;
+}
+
+const ACTIONS = {
+  install: (id) => sendJson(`/api/speech/components/${encodeURIComponent(id)}/install`, "POST", {}),
+  cancel: (id) => sendJson(`/api/speech/components/${encodeURIComponent(id)}/cancel`, "POST", {}),
+  remove: (id) => getJson(`/api/speech/components/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
+function componentItem(c, gpuName) {
+  const act = (name) => async (ev) => {
+    ev.target.disabled = true;
+    try {
+      await ACTIONS[name](c.id);
+    } catch (err) {
+      alert(err.message);
+    }
+    refreshSpeech();
+  };
+  let state;
+  if (c.status === "installing") {
+    state = [
+      el("progress", { max: String(c.download_bytes), value: String(c.downloaded_bytes) }),
+      el("div", { class: "actions" },
+        el("span", { class: "state", text: `正在下载 ${gb(c.downloaded_bytes)} / ${gb(c.download_bytes)}` }),
+        el("button", { class: "secondary", text: "取消", onclick: act("cancel") })),
+    ];
+  } else if (c.status === "installed") {
+    state = [el("div", { class: "actions" },
+      el("span", { class: "state result ok", text: "已安装" }),
+      el("button", { class: "secondary", text: "删除", onclick: act("remove") }))];
+  } else {
+    state = [el("div", { class: "actions" },
+      el("button", { text: c.downloaded_bytes ? "继续安装" : "安装", onclick: act("install") }),
+      c.error && el("span", { class: "state result err", text: c.error }))];
+  }
+  const note = c.kind === "gpu_runtime" && !gpuName ? "（没有检测到 NVIDIA 显卡，不需要安装）" : "";
+  return el("li", {},
+    el("div", { class: "head" },
+      el("strong", { text: c.title }),
+      el("span", { class: "size", text: `下载 ${gb(c.download_bytes)}${note}` }),
+      c.recommended && el("span", { class: "badge", text: "推荐" })),
+    el("div", { class: "desc", text: c.description }),
+    ...state);
+}
+
+async function refreshSpeech() {
+  clearTimeout(speechTimer);
+  const s = await getJson("/api/speech");
+  $("speech-hw").textContent = hardwareText(s);
+  // Without an NVIDIA GPU the runtime would be 1.3 GB of nothing: list it only when useful.
+  const shown = s.components.filter((c) => c.kind !== "gpu_runtime" || s.gpu.name || c.status !== "not_installed");
+  $("speech-components").replaceChildren(...shown.map((c) => componentItem(c, s.gpu.name)));
+  if (s.components.some((c) => c.status === "installing")) speechTimer = setTimeout(refreshSpeech, SPEECH_POLL_MS);
+}
+
 // ------------------------------------------------------------ review
 async function setupReview() {
   const s = await getJson("/api/review/summary");
@@ -163,7 +244,7 @@ async function init() {
       status.textContent = "学习数据来自更新版本的 VideoTutor，当前为只读。请安装最新版。";
       status.className = "status err";
     }
-    await Promise.all([setupLlm(), setupLevel(), setupReview()]);
+    await Promise.all([setupLlm(), setupLevel(), setupReview(), refreshSpeech()]);
     renderRecent(await getJson("/api/videos/recent?limit=10"));
   } catch (err) {
     status.textContent = "无法连接本地服务，请确认 VideoTutor 正在运行（任务栏右下角托盘图标）。";

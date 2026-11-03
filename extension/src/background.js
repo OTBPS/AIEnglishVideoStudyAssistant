@@ -87,6 +87,17 @@ const handlers = {
       body: { auto: true },
     }),
 
+  transcribe: (msg) =>
+    api(`/api/videos/${enc(msg.platform)}/${enc(msg.externalId)}/transcription`, {
+      method: "POST",
+      body: { audio_urls: msg.urls, duration_ms: msg.durationMs ?? null },
+    }),
+
+  transcription: (msg) => api(`/api/videos/${enc(msg.platform)}/${enc(msg.externalId)}/transcription`),
+
+  "cancel-transcription": (msg) =>
+    api(`/api/videos/${enc(msg.platform)}/${enc(msg.externalId)}/transcription`, { method: "DELETE" }),
+
   missed: (msg) =>
     api(`/api/videos/${enc(msg.platform)}/${enc(msg.externalId)}/missed`, {
       method: "POST",

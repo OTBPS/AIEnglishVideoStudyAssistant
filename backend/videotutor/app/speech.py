@@ -78,9 +78,13 @@ class RecognitionPlan:
 
 
 class _Install:
-    def __init__(self, handle: TaskHandle[None]) -> None:
-        self.handle = handle
+    def __init__(self) -> None:
+        self.handle: TaskHandle[None] | None = None
         self.downloaded = 0
+
+    @property
+    def running(self) -> bool:
+        return self.handle is not None and not self.handle.state.finished
 
 
 class SpeechSetup:
@@ -102,7 +106,10 @@ class SpeechSetup:
         self._tasks = tasks
         self._installs: dict[str, _Install] = {}
         self._gpu_failure: str | None = None
-        self._lock = threading.Lock()
+        self._lock = (
+            threading.Lock()
+        )  # guards _installs and _gpu_failure; never held while calling out
+        self._install_lock = threading.Lock()  # serializes install() itself
 
     # ------------------------------------------------------------ queries
     def overview(self) -> SpeechOverview:
@@ -129,54 +136,55 @@ class SpeechSetup:
     # ------------------------------------------------------------ commands
     def install(self, component_id: str) -> ComponentView:
         component = self._require(component_id)
-        with self._lock:
-            current = self._installs.get(component_id)
-            if current is not None and not current.handle.state.finished:
+        with self._install_lock:  # check-then-start is one step: a double click starts one job
+            if self._running(component_id) or self._store.is_installed(component):
                 return self._view(component, False)
-        if self._store.is_installed(component):
-            return self._view(component, False)
-        needed = int(component.download_bytes * SPACE_FACTOR) + SPACE_MARGIN
-        if self._store.free_bytes() < needed:
-            raise DiskFullError(
-                f"{component.id} needs {needed} bytes",
-                user_message=f"磁盘空间不足：安装需要约 {needed / 1e9:.1f} GB 可用空间。",
-            )
-        job: _Install | None = None
+            needed = int(component.download_bytes * SPACE_FACTOR) + SPACE_MARGIN
+            if self._store.free_bytes() < needed:
+                raise DiskFullError(
+                    f"{component.id} needs {needed} bytes",
+                    user_message=f"磁盘空间不足：安装需要约 {needed / 1e9:.1f} GB 可用空间。",
+                )
+            job = _Install()
 
-        def run(stop: threading.Event) -> None:
-            def progress(n: int) -> None:
-                if job is not None:
+            def run(stop: threading.Event) -> None:
+                def progress(n: int) -> None:
                     job.downloaded = n
 
-            self._store.install(component, self._downloader, progress, stop)
-            if component.kind is ComponentKind.GPU_RUNTIME:
-                with self._lock:
-                    self._gpu_failure = None  # a fresh runtime deserves a fresh try
+                self._store.install(component, self._downloader, progress, stop)
+                if component.kind is ComponentKind.GPU_RUNTIME:
+                    with self._lock:
+                        self._gpu_failure = None  # a fresh runtime deserves a fresh try
 
-        handle = self._tasks.run_cancellable(f"install:{component.id}", run, timeout=None)
-        job = _Install(handle)
-        with self._lock:
-            self._installs[component_id] = job
+            job.handle = self._tasks.run_cancellable(f"install:{component.id}", run, timeout=None)
+            with self._lock:
+                self._installs[component_id] = job
         return self._view(component, False)
 
     def cancel(self, component_id: str) -> ComponentView:
         component = self._require(component_id)
         with self._lock:
             job = self._installs.get(component_id)
-        if job is not None:
+        if job is not None and job.handle is not None:
             job.handle.cancel()
         return self._view(component, False)
 
     def remove(self, component_id: str) -> ComponentView:
         component = self._require(component_id)
         with self._lock:
-            job = self._installs.pop(component_id, None)
-        if job is not None and not job.handle.state.finished:
-            raise InvalidInputError(f"{component_id} is being installed")
+            job = self._installs.get(component_id)
+            if job is not None and job.running:
+                raise InvalidInputError(f"{component_id} is being installed")
+            self._installs.pop(component_id, None)
         self._store.remove(component)
         return self._view(component, False)
 
     # ------------------------------------------------------------ internals
+    def _running(self, component_id: str) -> bool:
+        with self._lock:
+            job = self._installs.get(component_id)
+        return job is not None and job.running
+
     def _require(self, component_id: str) -> Component:
         component = self._catalog.get(component_id)
         if component is None:
@@ -186,7 +194,7 @@ class SpeechSetup:
     def _view(self, component: Component, recommended: bool) -> ComponentView:
         with self._lock:
             job = self._installs.get(component.id)
-        if job is not None and not job.handle.state.finished:
+        if job is not None and job.running:
             return ComponentView(
                 component, InstallStatus.INSTALLING, job.downloaded, None, recommended
             )
@@ -194,7 +202,7 @@ class SpeechSetup:
             return ComponentView(
                 component, InstallStatus.INSTALLED, component.download_bytes, None, recommended
             )
-        error = _install_error(job.handle) if job is not None else None
+        error = _install_error(job.handle) if job is not None and job.handle else None
         status = InstallStatus.FAILED if error else InstallStatus.NOT_INSTALLED
         downloaded = job.downloaded if job is not None else 0
         return ComponentView(component, status, downloaded, error, recommended)

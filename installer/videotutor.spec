@@ -6,6 +6,7 @@
 import tomllib
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -47,11 +48,20 @@ a = Analysis(
         (str(ROOT / "product.toml"), "."),
         (str(PKG / "ui" / "web"), "videotutor/ui/web"),
         (str(PKG / "assets"), "videotutor/assets"),
+        # Speech recognition (run by the same exe with --asr-worker): the
+        # Silero VAD model ships inside faster_whisper/assets.
+        *collect_data_files("faster_whisper"),
+    ],
+    binaries=[
+        *collect_dynamic_libs("ctranslate2"),  # ctranslate2.dll, the cuDNN loader, OpenMP
     ],
     hiddenimports=[
         "pystray._win32",          # chosen at runtime by pystray's backend loader
     ],
-    excludes=["tkinter", "unittest", "pytest", "mypy", "ruff", "IPython", "numpy"],
+    # The GPU runtime (cuBLAS / cuDNN) is never bundled: it is a 1.3 GB
+    # optional download (infra/asr/catalog.py).
+    excludes=["tkinter", "unittest", "pytest", "mypy", "ruff", "IPython", "torch", "tensorflow",
+              "hf_xet"],  # huggingface_hub's download accelerator: we never download through it
     noarchive=False,
 )
 pyz = PYZ(a.pure)

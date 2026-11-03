@@ -2,34 +2,42 @@
 //
 // Owns the per-tab watching state: which video, which watch session, whether
 // its transcript is stored. Forwards the page script's findings to the service
-// worker, reports playback events, replays missed lines (Alt+R), and serves
-// the side panel over a Port ("sidepanel"): state + current time out, seek /
-// "missed" requests in. Platform differences live in PLATFORMS, nowhere else.
+// worker, reports playback events, replays missed lines (Alt+R), runs local
+// speech recognition for videos without English subtitles, and serves the
+// side panel over a Port ("sidepanel"): state + current time out, seek /
+// "missed" / "transcribe" requests in. Platform differences live in
+// PLATFORMS, nowhere else.
 (() => {
   "use strict";
   const FROM_PAGE = "videotutor-page";
   const FROM_CONTENT = "videotutor-content";
   const PROGRESS_EVERY_MS = 5000;
   const NO_TRANSCRIPT_REWIND_MS = 5000;
+  const TRANSCRIPTION_POLL_MS = 3000;
 
   const PLATFORMS = {
     "www.youtube.com": {
       name: "youtube",
       video: () => document.querySelector("#movie_player video") || document.querySelector("video"),
       isAd: () => Boolean(document.getElementById("movie_player")?.classList.contains("ad-showing")),
+      // Its audio streams need tokens only the player can mint; and a YouTube
+      // video without an English track is almost never in English anyway.
+      canTranscribe: false,
     },
     "www.bilibili.com": {
       name: "bilibili",
       video: () => document.querySelector("#bilibili-player video") || document.querySelector("video"),
       isAd: () => false,
+      canTranscribe: true, // bilibili/page.js reads the audio stream URL
     },
   };
   const platform = PLATFORMS[location.hostname];
   if (!platform) return;
 
-  let state = null; // {videoId, title, sessionId, transcript, wanted, status}
+  let state = null; // {videoId, title, sessionId, transcript, wanted, status, job}
   let video = null;
   let lastProgressAt = 0;
+  let jobTimer = null;
   const panels = new Set();
 
   const toPage = (msg) => window.postMessage({ source: FROM_CONTENT, ...msg }, location.origin);
@@ -54,6 +62,8 @@
         title: state.title,
         status: state.status,
         transcript: state.transcript,
+        canTranscribe: platform.canTranscribe,
+        job: state.job, // speech recognition: {status, progress, error, model, device} or null
       },
     };
   }
@@ -68,7 +78,15 @@
   // ------------------------------------------------------------ video lifecycle
   async function onVideo(v) {
     await leave();
-    state = { videoId: v.videoId, title: v.title, sessionId: null, transcript: null, wanted: null, status: "connecting" };
+    state = {
+      videoId: v.videoId,
+      title: v.title,
+      sessionId: null,
+      transcript: null,
+      wanted: null,
+      status: "connecting",
+      job: null,
+    };
     notifyPanels();
     const r = await send({
       type: "open-video",
@@ -83,6 +101,7 @@
     if (state.wanted) requestTrack();
     setStatus(state.transcript ? "ready" : state.wanted ? "fetching" : "no-english");
     if (state.transcript) startPrewatch();
+    else if (!state.wanted && platform.canTranscribe) resumeTranscription(v.videoId);
     if (video && !video.paused) watchEvent("play");
   }
 
@@ -118,9 +137,72 @@
   }
 
   async function leave() {
+    clearTimeout(jobTimer);
     if (state?.sessionId) send({ type: "close-session", sessionId: state.sessionId });
     state = null;
     notifyPanels();
+  }
+
+  // ------------------------------------------------------------ speech recognition
+  // The job runs in the desktop app and survives this page: reopening the
+  // video picks it up again.
+  const ids = (videoId) => ({ platform: platform.name, externalId: videoId });
+
+  async function resumeTranscription(videoId) {
+    const r = await send({ type: "transcription", ...ids(videoId) });
+    if (r.ok && r.data && !["failed", "cancelled"].includes(r.data.status)) onJob(videoId, r.data);
+  }
+
+  function transcribe() {
+    if (!state || state.transcript || !platform.canTranscribe) return;
+    if (state.job && !["failed", "cancelled"].includes(state.job.status)) return; // already running
+    state.job = { status: "queued", progress: 0 };
+    setStatus("transcribing");
+    toPage({ type: "audio-source", videoId: state.videoId });
+  }
+
+  async function onAudioSource(m) {
+    if (state?.videoId !== m.videoId) return;
+    const r = await send({ type: "transcribe", ...ids(m.videoId), urls: m.urls, durationMs: m.durationMs });
+    if (r.ok) onJob(m.videoId, r.data);
+    else jobFailed(m.videoId, r.detail || "无法开始语音识别，请确认 VideoTutor 正在运行。");
+  }
+
+  function jobFailed(videoId, error) {
+    if (state?.videoId !== videoId) return;
+    state.job = { status: "failed", progress: 0, error };
+    setStatus("no-english");
+  }
+
+  function onJob(videoId, job) {
+    if (state?.videoId !== videoId) return;
+    clearTimeout(jobTimer);
+    state.job = job;
+    if (job.status === "done" && job.transcript) {
+      state.transcript = job.transcript;
+      setStatus("ready");
+      startPrewatch();
+    } else if (job.status === "failed" || job.status === "cancelled") {
+      setStatus("no-english");
+    } else {
+      setStatus("transcribing");
+      jobTimer = setTimeout(() => pollJob(videoId), TRANSCRIPTION_POLL_MS);
+    }
+  }
+
+  async function pollJob(videoId) {
+    if (state?.videoId !== videoId) return;
+    const r = await send({ type: "transcription", ...ids(videoId) });
+    if (r.ok && r.data) onJob(videoId, r.data);
+    else if (r.ok) jobFailed(videoId, "桌面程序重启过，识别已中断，请重试。");
+    else jobTimer = setTimeout(() => pollJob(videoId), TRANSCRIPTION_POLL_MS * 2); // app busy or restarting
+  }
+
+  async function cancelTranscription() {
+    if (!state?.job) return;
+    const videoId = state.videoId;
+    const r = await send({ type: "cancel-transcription", ...ids(videoId) });
+    if (r.ok && r.data) onJob(videoId, r.data);
   }
 
   // ------------------------------------------------------------ playback
@@ -190,6 +272,8 @@
     if (m.type === "video") onVideo(m.video);
     else if (m.type === "video-left") leave();
     else if (m.type === "track-data") onTrackData(m);
+    else if (m.type === "audio-source") onAudioSource(m);
+    else if (m.type === "audio-failed") jobFailed(m.videoId, "拿不到这个视频的音频，请刷新页面后重试。");
     else if (m.type === "track-failed" && state?.videoId === m.videoId && !state.transcript) {
       setStatus("fetching"); // retried on the next "play"
     }
@@ -208,6 +292,10 @@
         video.currentTime = Math.max(0, m.ms) / 1000;
       } else if (m?.type === "missed") {
         missed();
+      } else if (m?.type === "transcribe") {
+        transcribe();
+      } else if (m?.type === "cancel-transcription") {
+        cancelTranscription();
       }
     });
     port.postMessage(snapshot());

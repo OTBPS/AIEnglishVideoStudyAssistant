@@ -8,6 +8,11 @@
 //
 // Same message protocol as youtube/page.js; content.js does not care which
 // platform it is talking to. Classic script: MAIN-world scripts cannot be modules.
+//
+// For videos with no subtitle file it also hands out the audio stream URL
+// (lowest bitrate is plenty for speech recognition). The URL is signed for
+// this session and expires after a couple of hours, so it is read only when
+// the learner asks for recognition.
 (() => {
   "use strict";
   if (window.__videotutorPage) return;
@@ -18,6 +23,7 @@
   const post = (msg) => window.postMessage({ source: FROM_PAGE, ...msg }, location.origin);
 
   const tracksById = new Map(); // track_id -> subtitle_url, for the announced video
+  let announcedPage = null; // {bvid, cid, durationMs} of the announced video
 
   async function getJson(url) {
     const resp = await fetch(url, { credentials: "include" });
@@ -55,6 +61,7 @@
         };
       });
     const parts = (data.pages || []).length;
+    announcedPage = { bvid, cid: page.cid, durationMs: page.duration ? page.duration * 1000 : null };
     return {
       videoId,
       title: parts > 1 && page.part ? `${data.title} · P${part} ${page.part}` : data.title,
@@ -104,9 +111,26 @@
     }
   }
 
+  // Non-WBI playurl answers without login (verified 2026-11); fnval=16 = DASH,
+  // where audio is a separate stream.
+  async function audioSource({ videoId }) {
+    try {
+      if (videoId !== announced || !announcedPage) throw new Error("not the current video");
+      const { bvid, cid, durationMs } = announcedPage;
+      const r = await getJson(`https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&fnval=16`);
+      const audio = (r.data?.dash?.audio || []).slice().sort((a, b) => a.bandwidth - b.bandwidth)[0];
+      if (!audio) throw new Error(`no audio stream (code ${r.code})`);
+      const urls = [audio.baseUrl || audio.base_url, ...(audio.backupUrl || audio.backup_url || [])].filter(Boolean);
+      post({ type: "audio-source", videoId, urls: urls.slice(0, 6), durationMs });
+    } catch (err) {
+      post({ type: "audio-failed", videoId, error: String(err) });
+    }
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== FROM_CONTENT) return;
     if (event.data.type === "fetch-track") fetchTrack(event.data);
+    else if (event.data.type === "audio-source") audioSource(event.data);
     else if (event.data.type === "hello") {
       announced = null;
       announce();

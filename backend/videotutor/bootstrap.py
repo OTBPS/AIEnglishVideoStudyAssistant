@@ -330,6 +330,7 @@ def smoke_test(product: Product, locations: Locations) -> int:
         problems += _smoke_database(app.videos)
         problems += _smoke_learning(app.vocabulary, product.name)
         problems += _smoke_review(app.review)
+        problems += _smoke_speech()
         if not locations.icon_file.exists():
             problems.append(f"missing {locations.icon_file}")
     finally:
@@ -387,6 +388,17 @@ def _smoke_learning(vocabulary: VocabularyService, app_name: str) -> list[str]:
     finally:
         store.delete("probe")
     return problems
+
+
+def _smoke_speech() -> list[str]:
+    """The exe can start itself as the recognition worker, and faster-whisper,
+    CTranslate2, PyAV and onnxruntime (with the VAD model) all load in it."""
+    try:
+        versions = WorkerRecognizer(*paths.worker_command()).selftest()
+    except Exception as exc:  # noqa: BLE001 -- any failure is a smoke problem
+        return [f"speech worker unusable: {type(exc).__name__}: {exc}"]
+    log.info("speech worker ok: %s", versions)
+    return []
 
 
 def _smoke_review(review: ReviewService) -> list[str]:

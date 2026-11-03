@@ -52,6 +52,15 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | `infra/srs.py` | FSRS（py-fsrs）实现 `SpacedRepetition` 端口 | — |
 | `domain/listening.py` / `app/listening.py` | 「没听清」：按播放位置定位当前句（停顿中则取刚结束的一句），记录次数，返回提前 0.3 秒的重放位置 | — |
 | `infra/captions/registry.py` | 所有字幕格式（json3 / srv3 / B 站 bcc）的统一解码入口 | — |
+| `domain/speech.py` | 可下载组件（按 sha256 固定的文件、镜像列表）；按设备选模型；把识别出的词按句末、停顿、长度切成字幕行 | 下载、进程 |
+| `app/speech.py` | 语音识别组件：安装/取消/删除（后台任务）、推荐（看有没有 NVIDIA 显卡）、本次识别用哪个模型和设备；显卡失败后本次运行改用 CPU | 文件布局 |
+| `app/transcription.py` | 为无字幕视频生成字幕：下载音频 → 识别 → 存为 `asr` 字幕；一次只跑一个，排队、取消、超时；只接受平台媒体域名的 https 地址 | 识别细节 |
+| `infra/asr/catalog.py` | 三个英文模型和 NVIDIA 运行库的下载清单（Hugging Face 固定提交 / NVIDIA 的 PyPI wheel，各带镜像） | — |
+| `infra/asr/worker.py` | 识别子进程（`VideoTutor.exe --asr-worker`）：faster-whisper，JSON 行协议；父进程消失即退出 | 只有它导入 faster-whisper |
+| `infra/asr/recognizer.py` | 启动并读取识别子进程；停止信号到达即杀进程；区分「显卡加载失败」和其他错误 | — |
+| `infra/downloads.py` | 下载：断点续传（跨镜像、跨重启）、逐个镜像重试、sha256 校验后才改成正式文件名 | — |
+| `infra/components_store.py` | `%LOCALAPPDATA%\VideoTutor\models\<id>`：先在 `.partial` 里下载解压，全部完成才原子换入；`installed.json` 记录文件指纹 | — |
+| `infra/hardware.py` | 用驱动自带的 nvidia-smi 检测显卡（不需要 CUDA） | 判断 CUDA 能否真正运行（交给识别时的回退） |
 | `infra/lexicon.py` | 读取内置英文词表（`tools/build_lexicon.py` 生成） | — |
 | `infra/llm/` | `ClaudeLanguageModel`（官方 SDK、结构化输出、拒答回退）、`OpenAICompatibleLanguageModel`、按配置构建的 provider | 提示词和业务校验 |
 | `infra/secrets.py` | API 密钥存 Windows 凭据管理器 | 写文件或日志 |
@@ -68,7 +77,8 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | `ui/tray.py` | 托盘菜单，每个菜单项调用 bootstrap 注入的动作 | — |
 | `extension/src/youtube/page.js` | 运行在页面主环境：读取播放器的视频信息，转发播放器自己的字幕响应（需要只有播放器才能生成的 pot 令牌，扩展无法自行请求） | 解析字幕 |
 | `extension/src/content.js` | 每个标签页的观看状态、播放事件、「没听清」（Alt+R）重放、与侧边栏的长连接；平台差异集中在 `PLATFORMS` 表 | 访问桌面程序（交给 service worker） |
-| `extension/src/bilibili/page.js` | B 站页面主环境：用学习者自己的登录状态取视频信息和 CC/AI 字幕（B 站要求登录），支持多 P（`BV…-p2`） | 解析字幕 |
+| `extension/src/bilibili/page.js` | B 站页面主环境：用学习者自己的登录状态取视频信息和 CC/AI 字幕（B 站要求登录），支持多 P（`BV…-p2`）；学习者要求语音识别时读取最低码率的音频流地址 | 解析字幕 |
+| `extension/src/panel/speech.js` | 侧边栏「没有英文字幕」卡片：去安装 / 开始识别 / 进度与取消 / 失败原因 | — |
 | `extension/src/background.js` | 唯一调用桌面程序 API 的地方；关闭标签页时结束会话；升级后自动重新加载扩展 | — |
 | `extension/src/sidepanel.js` | 跟随当前标签页显示字幕，高亮当前句，点击跳转 | 存学习数据 |
 
@@ -86,6 +96,16 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 - 应用退出时取消所有任务，最多等待一个宽限期。卡住的阻塞调用会被放弃，而不是一直等它结束。
 
 **状态模型。** 重要流程都用 `StateMachine` 加枚举表示，不用零散的布尔变量。目前有两个：应用生命周期（`AppState`）和任务状态（`TaskState`）；M1 会加上学习会话（课前、课中、课后）。
+
+**语音识别（M4b）。** 给没有任何英文字幕的视频（主要是 B 站）在本机生成字幕：
+- 引擎（faster-whisper + CTranslate2 + PyAV + onnxruntime，约 +80 MB 安装包）直接打进安装包，由同一个 exe 以
+  `--asr-worker` 启动为子进程。这样不需要再单独分发、校验一个 worker 程序（GitHub 在国内经常下载不了），
+  增量包也不会重复携带这些不变的文件。
+- 模型（148 MB–1.6 GB）和 NVIDIA 运行库（cuBLAS + cuDNN + NVRTC，约 1.3 GB 下载、2 GB 解压后）按需下载。
+  每个文件按 sha256 固定，主站失败自动换镜像（hf-mirror.com、阿里云 PyPI 镜像）：镜像只能给出原文件，否则校验失败。
+- 设备：检测到 NVIDIA 显卡（≥3.5 GB 显存）且装了运行库就用显卡；显卡加载或首次计算失败时，本次运行改用 CPU 并在主页显示原因。
+- 音频由扩展在页面里读出地址（B 站非 WBI playurl，无需登录），桌面程序带 `Referer` 从 B 站 CDN 下载，用完即删。
+- YouTube 不做：它的音频流需要只有播放器才能生成的令牌，而且没有英文字幕轨的 YouTube 视频基本不是英语。
 
 **AI 调用。** 业务层只依赖 `LanguageModel` 接口（一次结构化 JSON 请求），提示词、输出 schema 和校验都在 `app/`；
 具体调哪家 AI 是 `infra/llm/` 的事，换模型或换服务商不改业务代码。默认用 Claude 官方 SDK（`claude-opus-5-5`，
@@ -113,6 +133,7 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | 配置字段 | 在 `Settings` 里加带默认值的字段即可，不需要迁移 |
 | 改名、删除或改变配置字段含义 | `SCHEMA_VERSION += 1`，并在 `MIGRATIONS[旧版本]` 加纯函数；已发布的迁移永远不要改 |
 | 可替换的实现（如换 ASR 后端） | 新增一个实现同一 Protocol 的 adapter，在 bootstrap 里按条件选择 |
+| 换语音模型或运行库版本 | 在 `infra/asr/catalog.py` 写新条目（固定提交 + 每个文件的大小和 sha256），并换一个新的组件 id |
 | 新状态流程 | 定义枚举和转移表，交给 `StateMachine` |
 
 只有在出现真实的第二个实现，或测试真的需要替身时才加接口。不要预先抽象。
@@ -127,6 +148,7 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | 扩展 ↔ 程序 API | `/api/health` 返回 `protocol`。破坏性改动时 `protocol += 1`，且新程序至少保留一个版本的旧行为；扩展发现不兼容时提示用户更新 |
 | 安装器 `app_id`、扩展公钥 | 永不改变：改 AppId 会让升级找不到旧安装，改公钥会让所有人的扩展失效 |
 | 安装版本 | 禁止直接降级（可用 `/ALLOWDOWNGRADE` 覆盖）；增量包只能装在它对应的基线版本上 |
+| 已下载的组件 `models\<id>` | 升级不动；目录 id 对应的文件指纹变了才视为未安装 |
 
 必须破坏兼容时，需要在 PR 说明里写明：影响谁、自动迁移怎么做、用户需要做什么、怎么回滚。
 
@@ -147,5 +169,7 @@ python tools/verify_install.py   # 真实安装、修复、降级拦截、增量
 ## 暂不做的事
 
 - 依赖注入容器、插件系统、事件总线：在 bootstrap 里显式传构造参数已经足够。
+- Intel 核显（OpenVINO）识别后端：CPU 上的 small.en 已经足够快（10 分钟视频约 2 分钟）；需要时再按同一端口加实现。
+- 边识别边显示字幕：识别完成后一次性入库，侧边栏显示进度。
 - 应用内自动下载并安装更新：发布清单已经包含所需信息，客户端检查更新放到后续里程碑。
 - 代码签名、国际化框架、网页前端构建链（侧边栏需要组件化时再引入 Vite）。

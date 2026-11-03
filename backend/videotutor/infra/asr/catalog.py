@@ -76,7 +76,7 @@ SPEECH_MODELS: tuple[Component, ...] = (
         id="whisper-small.en",
         kind=ComponentKind.SPEECH_MODEL,
         title="标准模型（small.en）",
-        description="准确度好，只用 CPU 也够快：10 分钟的视频大约 2 分钟识别完。推荐。",
+        description="准确度好，只用 CPU 也够快：10 分钟的视频大约 2 分钟识别完。",
         files=_hf_files(
             "Systran/faster-whisper-small.en",
             "d1d751a5f8271d482d14ca55d9e2deeebbae577f",

@@ -241,6 +241,8 @@ def test_install_failures_cancel_and_remove(tmp_path: Path, tasks: TaskSuperviso
     dl.fail_names = set()
     dl.gate = threading.Event()
     assert setup.install(SMALL.id).status is InstallStatus.INSTALLING
+    assert setup.install(SMALL.id).status is InstallStatus.INSTALLING  # a second click: same job
+    assert [t.name for t in tasks.list() if not t.state.finished] == [f"install:{SMALL.id}"]
     with pytest.raises(InvalidInputError):
         setup.remove(SMALL.id)
     setup.cancel(SMALL.id)

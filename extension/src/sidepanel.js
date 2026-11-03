@@ -3,6 +3,7 @@
 // and lets the learner look up and mark words.
 import { api, appUrl } from "./backend.js";
 import { renderPrewatch, renderSummary } from "./panel/prewatch.js";
+import { renderSpeech } from "./panel/speech.js";
 import { openWordPopover, renderTranscript, wordClass } from "./panel/transcript.js";
 import { findSegmentIndex } from "./lib/timeline.js";
 
@@ -25,6 +26,7 @@ const el = {
   pop: $("popover"),
   missedBtn: $("missed-btn"),
   missedCount: $("missed-count"),
+  speech: $("speech"),
 };
 
 let port = null;
@@ -35,6 +37,8 @@ let prewatch = null;
 let currentIndex = -1;
 let userScrolledAt = 0;
 let pollTimer = null;
+let speech = null; // GET /api/speech, refreshed whenever the card is shown
+let lastState = null;
 const glossCache = new Map();
 
 const enc = encodeURIComponent;
@@ -65,7 +69,8 @@ async function refreshAppStatus() {
 const VIDEO_STATUS = {
   connecting: "正在连接桌面程序…",
   fetching: "正在获取英文字幕（视频开始播放后自动获取）…",
-  "no-english": "这个视频没有英文字幕。自动转写将在后续版本提供。",
+  "no-english": "这个视频没有英文字幕。",
+  transcribing: "正在用本机语音识别生成英文字幕…",
   "transcript-error": "字幕获取失败，刷新页面可以重试。",
   "read-only": "学习数据来自更新版本的 VideoTutor，当前为只读。请升级桌面程序。",
   offline: "未找到 VideoTutor 桌面程序：请先启动它，然后刷新视频页面。",
@@ -82,22 +87,46 @@ function showIdle(text) {
   segments = [];
   vocab = null;
   prewatch = null;
+  lastState = null;
   clearTimeout(pollTimer);
   renderSummary(el.summary, null);
   renderPrewatch(el.prewatch, null);
+  renderSpeech(el.speech, null);
+}
+
+// ------------------------------------------------------------ speech recognition
+const TRACK_KIND = { manual: "人工字幕", auto: "自动生成字幕", asr: "本机语音识别字幕" };
+const speechHandlers = {
+  transcribe: () => port?.postMessage({ type: "transcribe" }),
+  cancel: () => port?.postMessage({ type: "cancel-transcription" }),
+  openSetup: async () => {
+    const url = await appUrl("/ui/#speech");
+    if (url) chrome.tabs.create({ url });
+  },
+};
+
+async function updateSpeech(state) {
+  renderSpeech(el.speech, state, speech, speechHandlers);
+  if (el.speech.hidden || !state.canTranscribe || state.status === "transcribing") return;
+  const r = await api("/api/speech");
+  if (!r.ok || lastState !== state) return;
+  speech = r.data;
+  renderSpeech(el.speech, state, speech, speechHandlers);
 }
 
 async function onState(state) {
   if (!state) return showIdle("打开一个 YouTube 或 Bilibili 的英文视频，字幕会显示在这里。");
+  lastState = state;
   el.hint.textContent = "";
   el.video.hidden = false;
   el.title.textContent = state.title || state.externalId;
   const t = state.transcript;
   el.videoStatus.textContent =
     state.status === "ready" && t
-      ? `${t.segment_count} 句英文字幕 · ${t.kind === "manual" ? "人工字幕" : "自动生成字幕"}`
+      ? `${t.segment_count} 句英文字幕 · ${TRACK_KIND[t.kind] || t.kind}`
       : VIDEO_STATUS[state.status] || "";
   el.retry.hidden = state.status !== "offline";
+  updateSpeech(state);
 
   const key = `${state.platform}/${state.externalId}`;
   if (!t) {
