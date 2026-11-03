@@ -81,6 +81,12 @@ const handlers = {
       body: msg.payload,
     }),
 
+  "start-prewatch": (msg) =>
+    api(`/api/videos/${enc(msg.platform)}/${enc(msg.externalId)}/prewatch`, {
+      method: "POST",
+      body: { auto: true },
+    }),
+
   "watch-event": (msg) =>
     api(`/api/sessions/${Number(msg.sessionId)}/events`, { method: "POST", body: { events: [msg.event] } }),
 

@@ -9,6 +9,7 @@ Imports only the standard library: it is used before logging exists.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -53,6 +54,22 @@ def home_dir(app_name: str) -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     # Must match the uninstaller's "delete my data" path in installer/videotutor.iss.
     return Path(base) / app_name
+
+
+def per_home_name(base: str, home: Path) -> str:
+    """Name a per-installation resource (instance mutex, credential-store service).
+
+    One instance per data directory, not per machine.
+
+    The normal install uses the plain name (the installer's AppMutex checks
+    it). A run with VIDEOTUTOR_HOME pointing elsewhere (tests, demos, a
+    portable copy) gets its own name, so it neither blocks nor is blocked by
+    the real app -- two processes on *different* data cannot conflict.
+    """
+    if not os.environ.get(HOME_ENV):
+        return base
+    digest = hashlib.sha256(str(home.resolve()).lower().encode()).hexdigest()[:12]
+    return f"{base}-{digest}"
 
 
 def resolve(app_name: str) -> Locations:

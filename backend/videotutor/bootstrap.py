@@ -23,6 +23,7 @@ from videotutor.app.videos import VideoService
 from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
+from videotutor.infra import paths
 from videotutor.infra.captions.youtube import YouTubeCaptionDecoder
 from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
@@ -67,7 +68,11 @@ class Application:
         self.locations = locations
         self.options = options
         self.desktop: Desktop = desktop or WindowsDesktop()
-        self.secrets: SecretStore = secrets or KeyringSecretStore(product.name)
+        # A test/demo run with its own data directory must never see or
+        # overwrite the real installation's API key.
+        self.secrets: SecretStore = secrets or KeyringSecretStore(
+            paths.per_home_name(product.name, locations.home)
+        )
         self.lifecycle = Lifecycle()
         self.settings = JsonSettingsStore(locations.settings_file)
         self.tasks = TaskSupervisor()

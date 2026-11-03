@@ -201,6 +201,7 @@ def test_home_page_is_served(client: TestClient) -> None:
     resp = client.get("/", follow_redirects=True)
     assert resp.status_code == 200
     assert "VideoTutor" in resp.text
+    assert resp.headers["cache-control"] == "no-cache"  # upgrades never run stale scripts
 
 
 @pytest.mark.parametrize("origin", ["https://evil.example", "http://127.0.0.1:9999", "null"])

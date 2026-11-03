@@ -189,13 +189,10 @@ def preview_candidates(profile: VocabularyProfile, limit: int = 5) -> list[WordS
 
     Research (ARCHITECTURE.md): pre-teaching many words distracts; 3-5 key
     words help. Prefer words this video repeats (they matter for following it),
-    then more common words (more useful to learn). Words outside the lexicon
-    are skipped: usually names, typos or caption artefacts.
+    then more common words (more useful to learn). Words beyond the lexicon
+    ("counterintuitive") still qualify, ranked as the rarest; words always
+    written with a capital are skipped as probable names.
     """
-    candidates = [
-        w
-        for w in profile.unknown
-        if w.rank is not None and w.status is None and not w.always_capitalized
-    ]
-    candidates.sort(key=lambda w: (-w.count, w.rank or 0))
+    candidates = [w for w in profile.unknown if w.status is None and not w.always_capitalized]
+    candidates.sort(key=lambda w: (-w.count, w.rank if w.rank is not None else 1_000_000))
     return candidates[:limit]

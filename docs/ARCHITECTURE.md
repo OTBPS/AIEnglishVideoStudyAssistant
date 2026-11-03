@@ -40,6 +40,14 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | `domain/video.py` | `VideoRef`（按平台校验 ID）、`CaptionTrack`、选轨规则（人工 > 自动，en > en-XX） | — |
 | `domain/transcript.py` | `Transcript`/`Segment` 不变式；`normalize` 清洗、合并滚动重复、消除重叠 | — |
 | `domain/watch.py` | `WatchSession` 状态机；只计入真实前进播放的时长，乱序或重复事件忽略 | — |
+| `domain/vocab.py` | 分词（跳过声音标签、拆缩写）、按整段判定人名、掌握判定、覆盖率与难度分档、预习候选 | 读词表文件（交给 `infra/lexicon.py`） |
+| `domain/prewatch.py` | 释义、问题、预测提示的不变式 | — |
+| `app/vocabulary.py` | 某视频对当前学习者的词汇画像（每段字幕的词、人名、覆盖率）；标记词状态 | — |
+| `app/prewatch.py` | 课前预习：一次 AI 调用生成释义和问题，作为后台任务运行，结果入库；单词点查 | 知道用的是哪家 AI |
+| `app/llm_settings.py` | AI 服务配置：保存模型和密钥、连通测试 | 保存密钥明文 |
+| `infra/lexicon.py` | 读取内置英文词表（`tools/build_lexicon.py` 生成） | — |
+| `infra/llm/` | `ClaudeLanguageModel`（官方 SDK、结构化输出、拒答回退）、`OpenAICompatibleLanguageModel`、按配置构建的 provider | 提示词和业务校验 |
+| `infra/secrets.py` | API 密钥存 Windows 凭据管理器 | 写文件或日志 |
 | `infra/db/` | SQLite：打开时新建、损坏隔离、备份后迁移、新版本只读；单连接加锁；仓储实现 | 业务规则 |
 | `infra/captions/youtube.py` | YouTube json3 / srv3 解码 | 选轨、清洗（属于 domain） |
 | `infra/settings_store.py` | 配置的读写：迁移、损坏隔离、单字段回退、新版本文件只读、原子写 | — |
@@ -70,6 +78,18 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 - 应用退出时取消所有任务，最多等待一个宽限期。卡住的阻塞调用会被放弃，而不是一直等它结束。
 
 **状态模型。** 重要流程都用 `StateMachine` 加枚举表示，不用零散的布尔变量。目前有两个：应用生命周期（`AppState`）和任务状态（`TaskState`）；M1 会加上学习会话（课前、课中、课后）。
+
+**AI 调用。** 业务层只依赖 `LanguageModel` 接口（一次结构化 JSON 请求），提示词、输出 schema 和校验都在 `app/`；
+具体调哪家 AI 是 `infra/llm/` 的事，换模型或换服务商不改业务代码。默认用 Claude 官方 SDK（`claude-opus-5-5`，
+`effort: low`，JSON schema 结构化输出，开启服务端拒答回退）；给无法访问 Claude 的地区保留兼容 OpenAI 接口的实现。
+所有 AI 调用都在 `TaskSupervisor` 里运行（有超时，退出时取消）；结果入库，同一视频不重复计费；自动触发的生成失败后不会自动重试。
+密钥只存在操作系统凭据管理器里，接口只能写入、不能读出。
+
+**词汇。** 词表在构建时从 wordfreq + simplemma 抽取英文部分（236 KB，许可见 `THIRD_PARTY_NOTICES.md`），
+运行时只用标准库。分词只在 Python 里做，接口把每段字幕的词位置（span）发给侧边栏，前端不重复实现分词。
+
+**测试/演示实例隔离。** 设置了 `VIDEOTUTOR_HOME` 的运行（测试、演示、便携版）使用按数据目录区分的单实例锁和凭据管理器名称，
+既不会被正在运行的正式程序挡住，也绝不会读到或覆盖正式安装的 API 密钥。
 
 **本地 API 安全。**
 - 只监听 127.0.0.1；

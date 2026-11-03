@@ -98,12 +98,14 @@ def main(argv: list[str] | None = None) -> int:
 
         # Decide single-instance before importing the web stack: a duplicate
         # launch should exit in a fraction of a second.
-        mutex = InstanceMutex(product.single_instance_mutex)
+        mutex = InstanceMutex(paths.per_home_name(product.single_instance_mutex, loc.home))
         if not mutex.claim():
             if not RuntimeFile(loc.runtime_file).notify_existing():
-                message_box(
-                    f"{product.name} 已经在运行，请在任务栏右下角的托盘图标中打开。", product.name
-                )
+                text = f"{product.name} 已经在运行，请在任务栏右下角的托盘图标中打开。"
+                if streams.has_console():
+                    print(text, file=sys.stderr)  # never block a terminal run on a dialog
+                else:
+                    message_box(text, product.name)
             log.info("already running; handed over to the existing instance")
             return 0
 

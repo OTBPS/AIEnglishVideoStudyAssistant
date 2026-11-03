@@ -34,14 +34,57 @@
     </div>
   </section>
 
-  <section class="step todo">
+  <section class="step">
     <h2><span class="num">2</span>填写 AI 密钥</h2>
-    <p>用于生成释义、出题和批改。<em>即将推出。</em></p>
+    <p>AI 用来给生词写释义、生成「带着问题看」的问题。密钥保存在 Windows 凭据管理器里，不会写进任何文件。</p>
+    <form id="llm-form" class="form">
+      <div class="field">
+        <span class="label">服务</span>
+        <label><input type="radio" name="provider" value="claude" checked> Claude（Anthropic）</label>
+        <label><input type="radio" name="provider" value="openai_compatible"> 兼容 OpenAI 接口的服务</label>
+      </div>
+      <label class="field" id="base-url-field" hidden>
+        <span class="label">接口地址</span>
+        <input id="llm-base-url" type="url" placeholder="https://api.example.com/v1" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="label">模型</span>
+        <input id="llm-model" type="text" required autocomplete="off">
+      </label>
+      <p class="note" id="model-note">默认 claude-opus-5-5，效果最好；想省钱可以改成 claude-sonnet-5-5 或 claude-haiku-5-5。每个视频的课前预习大约消耗几分钱。</p>
+      <label class="field">
+        <span class="label">API 密钥</span>
+        <input id="llm-key" type="password" autocomplete="off" placeholder="粘贴密钥">
+      </label>
+      <div class="actions">
+        <button type="submit" id="llm-save">保存并测试</button>
+        <button type="button" id="llm-remove" class="secondary" hidden>删除已保存的密钥</button>
+        <span id="llm-result" class="result"></span>
+      </div>
+    </form>
   </section>
 
-  <section class="step todo">
-    <h2><span class="num">3</span>词汇量快测（约 2 分钟）</h2>
-    <p>让软件知道你认识哪些词，从第一天起就能判断视频难度。<em>即将推出。</em></p>
+  <section class="step">
+    <h2><span class="num">3</span>你的词汇量</h2>
+    <p>用来判断视频难不难、哪些词算生词。选一个最接近的就行，以后在侧边栏把认识的词点成「认识」会越来越准。</p>
+    <form id="level-form" class="form">
+      <label class="field">
+        <span class="label">词汇量</span>
+        <select id="vocab-level">
+          <option value="1500">约 1500 词（初中）</option>
+          <option value="3000">约 3000 词（高中）</option>
+          <option value="4500">约 4500 词（大学英语四级）</option>
+          <option value="6000">约 6000 词（六级）</option>
+          <option value="8000">约 8000 词（考研 / 雅思）</option>
+          <option value="12000">约 12000 词（专八 / GRE）</option>
+        </select>
+      </label>
+      <label class="field checkbox">
+        <input id="auto-prewatch" type="checkbox">
+        <span>打开视频时自动生成课前预习（需要 AI 密钥）</span>
+      </label>
+      <span id="level-result" class="result"></span>
+    </form>
   </section>
 
   <footer id="footer"></footer>

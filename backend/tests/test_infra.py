@@ -175,3 +175,13 @@ def test_desktop_open_url_uses_webbrowser(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
     WindowsDesktop().open_url("http://127.0.0.1:1/")
     assert opened == ["http://127.0.0.1:1/"]
+
+
+def test_mutex_name_is_per_data_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    base = r"Local\VideoTutor"
+    monkeypatch.delenv(paths.HOME_ENV, raising=False)
+    assert paths.per_home_name(base, tmp_path / "a") == base  # the installer's AppMutex
+    monkeypatch.setenv(paths.HOME_ENV, str(tmp_path / "a"))
+    a = paths.per_home_name(base, tmp_path / "a")
+    b = paths.per_home_name(base, tmp_path / "b")
+    assert a.startswith(base + "-") and a != b

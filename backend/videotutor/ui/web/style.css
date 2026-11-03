@@ -60,3 +60,21 @@ footer { margin-top: 32px; color: var(--muted); font-size: 12px; text-align: cen
 .recent a { color: var(--accent); text-decoration: none; }
 .recent a:hover { text-decoration: underline; }
 .recent .meta { color: var(--muted); font-size: 12px; }
+.form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.field .label { width: 5.5em; flex: none; color: var(--muted); font-size: 13px; }
+.field input[type="text"], .field input[type="url"], .field input[type="password"], .field select {
+  flex: 1 1 260px; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit;
+}
+.field.checkbox { gap: 8px; }
+.note { margin: -4px 0 0; color: var(--muted); font-size: 12px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+button.secondary { background: transparent; color: var(--accent); }
+button:disabled { opacity: .6; cursor: progress; }
+.result { font-size: 13px; }
+.result.ok { color: #16a34a; }
+.result.err { color: #dc2626; }
+
+/* The hidden attribute must win over the display rules above. */
+[hidden] { display: none !important; }

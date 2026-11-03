@@ -143,9 +143,11 @@ def test_preview_prefers_repeated_then_common_words() -> None:
         WordStat("rare", 1, 30000, None, False),
         WordStat("repeated", 3, 9000, None, False),
         WordStat("common", 1, 4000, None, False),
-        WordStat("name", 5, None, None, False),  # outside the lexicon: skipped
+        WordStat("counterintuitive", 1, None, None, False),  # beyond the lexicon: rarest
+        WordStat("gillian", 5, None, None, False, always_capitalized=True),  # probable name
         WordStat("studying", 9, 5000, WordStatus.LEARNING, False),  # already being studied
         WordStat("easy", 9, 10, None, True),
     )
-    picked = preview_candidates(VocabularyProfile(30, 9, words), limit=2)
-    assert [w.lemma for w in picked] == ["repeated", "common"]
+    profile = VocabularyProfile(30, 9, words)
+    assert [w.lemma for w in preview_candidates(profile, limit=2)] == ["repeated", "common"]
+    assert [w.lemma for w in preview_candidates(profile)][-1] == "counterintuitive"

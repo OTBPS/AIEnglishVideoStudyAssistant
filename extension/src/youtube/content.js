@@ -65,6 +65,7 @@
     attachVideo();
     if (state.wanted) requestTrack();
     setStatus(state.transcript ? "ready" : state.wanted ? "fetching" : "no-english");
+    if (state.transcript) startPrewatch();
     if (video && !video.paused) watchEvent("play");
   }
 
@@ -85,9 +86,18 @@
       state.transcript = r.data;
       state.wanted = null;
       setStatus("ready");
+      startPrewatch();
     } else if (!state.transcript) {
       setStatus("transcript-error");
     }
+  }
+
+  // Ask the app to prepare glosses and questions in the background; it decides
+  // (auto_prewatch setting, AI key present, already done) whether to act.
+  async function startPrewatch() {
+    if (!state) return;
+    const r = await send({ type: "start-prewatch", platform: "youtube", externalId: state.videoId });
+    if (r.ok) for (const port of panels) port.postMessage({ type: "prewatch-started" });
   }
 
   async function leave() {

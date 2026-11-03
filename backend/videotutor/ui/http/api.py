@@ -8,11 +8,11 @@ is talking to. See docs/ARCHITECTURE.md before changing a response shape.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -75,6 +75,17 @@ def create_app(deps: ApiDeps, port: int) -> FastAPI:
         title=product.name, version=product.version, docs_url=None, redoc_url=None, openapi_url=None
     )
     app.middleware("http")(local_only_guard(port, product.extension_origin))
+
+    @app.middleware("http")
+    async def revalidate_pages(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        # After an upgrade the browser must not keep running cached old page
+        # scripts against the new API: always revalidate (cheap on localhost).
+        response = await call_next(request)
+        if request.url.path.startswith("/ui"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     for exc_type, status in _ERRORS.items():
 
