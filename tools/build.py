@@ -220,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
             RELEASE / "release-manifest.json",
             rl.release_manifest(name, version, git_commit(), packages),
         )
-        (RELEASE / "SHA256SUMS.txt").write_text(rl.sha256sums(packages), encoding="utf-8")
+        rl.write_text_lf(RELEASE / "SHA256SUMS.txt", rl.sha256sums(packages))
         for pkg in packages:
             print(
                 f"  {pkg['kind']:<15} {pkg['file']:<45} {pkg['size'] / 1e6:7.1f} MB  "

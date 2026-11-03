@@ -142,5 +142,11 @@ def sha256sums(packages: list[dict[str, Any]]) -> str:
     return "".join(f"{p['sha256']}  {p['file']}\n" for p in packages)
 
 
+def write_text_lf(path: Path, text: str) -> None:
+    """Published files use LF on every platform: Windows' default CRLF made
+    `sha256sum -c SHA256SUMS.txt` fail to find the files (found in v0.1.0)."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def write_json(path: Path, doc: dict[str, Any]) -> None:
-    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    write_text_lf(path, json.dumps(doc, indent=2, ensure_ascii=False) + "\n")

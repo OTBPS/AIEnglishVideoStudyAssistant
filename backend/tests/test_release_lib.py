@@ -86,4 +86,9 @@ def test_release_manifest_and_checksums(tmp_path: Path) -> None:
     assert rl.sha256sums([entry]) == f"{entry['sha256']}  {pkg.name}\n"
     out = tmp_path / "m.json"
     rl.write_json(out, doc)
-    assert out.read_text(encoding="utf-8").endswith("\n")
+    sums = tmp_path / "SHA256SUMS.txt"
+    rl.write_text_lf(sums, rl.sha256sums([entry]))
+    for f in (out, sums):
+        data = f.read_bytes()
+        assert data.endswith(b"\n"), f.name
+        assert b"\r" not in data, f"{f.name} must use LF so `sha256sum -c` works"
