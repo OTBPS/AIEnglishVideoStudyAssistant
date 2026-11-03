@@ -28,6 +28,10 @@ log = logging.getLogger("llm.compat")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
 
+class _UnsupportedMaxTokens(Exception):
+    pass
+
+
 class OpenAICompatibleLanguageModel:
     def __init__(self, base_url: str, api_key: str, model: str, *, timeout: float = 90.0) -> None:
         if not base_url.startswith(("https://", "http://")):
@@ -44,7 +48,7 @@ class OpenAICompatibleLanguageModel:
     def generate_json(
         self, *, system: str, prompt: str, schema: dict[str, Any], max_tokens: int
     ) -> dict[str, Any]:
-        body = {
+        body: dict[str, Any] = {
             "model": self._model,
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
@@ -57,25 +61,14 @@ class OpenAICompatibleLanguageModel:
                 },
             ],
         }
-        req = urllib.request.Request(  # noqa: S310 -- scheme checked in __init__
-            self._url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self._key}"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 -- https/http checked
-                payload = json.load(resp)
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403):
-                raise LlmAuthError(f"HTTP {exc.code}") from exc
-            if exc.code == 429 or exc.code >= 500:
-                raise LlmUnavailableError(f"HTTP {exc.code}") from exc
-            raise LlmRequestError(f"HTTP {exc.code}") from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise LlmUnavailableError(str(exc)) from exc
-        except json.JSONDecodeError as exc:
-            raise LlmOutputError("provider returned non-JSON") from exc
+            payload = self._post(body)
+        except _UnsupportedMaxTokens:
+            # OpenAI's newer (reasoning) models reject `max_tokens` and want
+            # `max_completion_tokens`; most other compatible providers want the
+            # former. Retry once with the newer name.
+            body["max_completion_tokens"] = body.pop("max_tokens")
+            payload = self._post(body)
 
         try:
             choice = payload["choices"][0]
@@ -92,3 +85,28 @@ class OpenAICompatibleLanguageModel:
         if not isinstance(data, dict):
             raise LlmOutputError("JSON answer is not an object")
         return data
+
+    def _post(self, body: dict[str, Any]) -> Any:
+        req = urllib.request.Request(  # noqa: S310 -- scheme checked in __init__
+            self._url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self._key}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310 -- https/http checked
+                return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                raise LlmAuthError(f"HTTP {exc.code}") from exc
+            if exc.code == 429 or exc.code >= 500:
+                raise LlmUnavailableError(f"HTTP {exc.code}") from exc
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            if exc.code == 400 and "max_tokens" in body and "max_completion_tokens" in detail:
+                raise _UnsupportedMaxTokens from exc
+            log.warning("compat provider rejected the request: HTTP %s %s", exc.code, detail)
+            raise LlmRequestError(f"HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise LlmUnavailableError(str(exc)) from exc
+        except json.JSONDecodeError as exc:
+            raise LlmOutputError("provider returned non-JSON") from exc

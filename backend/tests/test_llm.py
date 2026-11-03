@@ -139,6 +139,7 @@ def test_claude_errors_are_mapped(exc: BaseException, error: type[Exception]) ->
 # ---------------------------------------------------------------- OpenAI-compatible
 class _Handler(BaseHTTPRequestHandler):
     reply: ClassVar[tuple[int, Any]] = (200, {})
+    replies: ClassVar[list[tuple[int, Any]]] = []  # consumed first, then `reply`
     seen: ClassVar[list[dict[str, Any]]] = []
 
     def do_POST(self) -> None:
@@ -150,7 +151,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "body": json.loads(self.rfile.read(length)),
             }
         )
-        status, payload = _Handler.reply
+        status, payload = _Handler.replies.pop(0) if _Handler.replies else _Handler.reply
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -167,6 +168,7 @@ def server() -> Iterator[str]:
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     _Handler.seen = []
+    _Handler.replies = []
     yield f"http://127.0.0.1:{httpd.server_port}/v1"
     httpd.shutdown()
 
@@ -254,3 +256,16 @@ def test_provider_builds_and_caches_by_configuration() -> None:
     secrets.set(secret_name("openai_compatible"), "k")
     compat = provider.current()
     assert isinstance(compat, OpenAICompatibleLanguageModel) and compat.model_name == "qwen-plus"
+
+
+def test_compat_retries_with_max_completion_tokens(server: str) -> None:
+    rejected = {
+        "error": {"message": "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens'."}
+    }
+    _Handler.replies = [(400, rejected)]
+    _Handler.reply = (200, _chat('{"ok": true}'))
+    model = OpenAICompatibleLanguageModel(server, "k", "gpt-x")
+    assert model.generate_json(system="s", prompt="p", schema=SCHEMA, max_tokens=50) == {"ok": True}
+    first, second = (r["body"] for r in _Handler.seen)
+    assert first["max_tokens"] == 50 and "max_completion_tokens" not in first
+    assert second["max_completion_tokens"] == 50 and "max_tokens" not in second
