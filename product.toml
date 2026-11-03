@@ -11,7 +11,7 @@
 id = "videotutor"
 name = "VideoTutor"
 display_name = "VideoTutor 视频英语学习助手"
-version = "0.2.0"
+version = "0.3.0"
 publisher = "OTBPS"
 repository = "OTBPS/AIEnglishVideoStudyAssistant"
 # Inno Setup AppId. NEVER change it: it is how an upgrade finds the existing
