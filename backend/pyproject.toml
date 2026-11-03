@@ -1,0 +1,115 @@
+[project]
+name = "videotutor"
+# The product version lives in ../product.toml and nowhere else. This file
+# only describes the development environment; nothing is built from it.
+dynamic = ["version"]
+description = "Learn English from YouTube / Bilibili videos: before, during and after watching."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "uvicorn>=0.32",
+    "pystray>=0.19",
+    "pillow>=11.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "import-linter>=2.1",
+    "pyinstaller>=6.11",
+]
+
+[tool.uv]
+# An application, not a library: nothing is built or published from here.
+package = false
+
+# ---------------------------------------------------------------- tests
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../tools"]
+addopts = "-q --strict-markers"
+
+[tool.coverage.run]
+source = ["videotutor"]
+branch = true
+omit = [
+    # Thin wrappers around a GUI event loop and the process entry point;
+    # their logic is delegated to tested modules. The packaged exe is
+    # smoke-tested by tools/build.py instead.
+    "videotutor/ui/tray.py",
+    "videotutor/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+# ---------------------------------------------------------------- lint
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PL", "S", "BLE"]
+ignore = [
+    "PLR2004",   # magic numbers: fine in tests and protocol constants
+    "RUF001",    # ambiguous unicode: Chinese UI strings use full-width punctuation
+    "RUF002",
+    "RUF003",
+    "PLC0415",   # local imports are deliberate: keep startup and dup-launch fast
+    "S603",      # subprocess with trusted, non-shell argument lists
+    "S607",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR0913", "PLW0603", "S108", "S310"]
+
+# ---------------------------------------------------------------- types
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["pystray.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------- layers
+# Dependency direction is a rule, not a convention. See docs/ARCHITECTURE.md.
+[tool.importlinter]
+root_package = "videotutor"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: bootstrap > ui > infra > app > core"
+type = "layers"
+layers = [
+    "videotutor.bootstrap",
+    "videotutor.ui",
+    "videotutor.infra",
+    "videotutor.app",
+    "videotutor.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "ui talks to app only, never to infra"
+type = "forbidden"
+source_modules = ["videotutor.ui"]
+forbidden_modules = ["videotutor.infra"]
+
+[[tool.importlinter.contracts]]
+name = "core stays standard-library only"
+type = "forbidden"
+source_modules = ["videotutor.core"]
+forbidden_modules = ["fastapi", "pydantic", "uvicorn", "pystray", "PIL"]
+allow_indirect_imports = true

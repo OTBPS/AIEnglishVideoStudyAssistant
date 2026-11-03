@@ -1,0 +1,7 @@
+# Normalise line endings: the same bytes on every machine keeps
+# file hashes (and therefore delta packages) reproducible.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.exe binary
+*.isl text eol=crlf

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VideoTutor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>VideoTutor</h1>
+    <p class="sub">看英文视频学英语 · 课前预习 · 课中跟练 · 课后测验</p>
+    <p class="status" id="status">正在连接本地服务…</p>
+  </header>
+
+  <section class="step">
+    <h2><span class="num">1</span>安装浏览器扩展</h2>
+    <p>扩展负责识别你正在看的 YouTube / Bilibili 视频，并在侧边栏里显示字幕和练习。只需安装一次。</p>
+    <ol>
+      <li>在 Chrome 地址栏输入 <code>chrome://extensions</code> 并回车（Edge 用户输入 <code>edge://extensions</code>）。</li>
+      <li>打开右上角的 <b>开发者模式</b> 开关。</li>
+      <li>点击 <b>加载已解压的扩展程序</b>，选择下面这个文件夹：</li>
+    </ol>
+    <div class="path-row">
+      <code id="ext-dir">…</code>
+      <button id="copy-ext">复制路径</button>
+      <button id="open-ext">打开文件夹</button>
+    </div>
+  </section>
+
+  <section class="step todo">
+    <h2><span class="num">2</span>填写 AI 密钥</h2>
+    <p>用于生成释义、出题和批改。<em>即将推出。</em></p>
+  </section>
+
+  <section class="step todo">
+    <h2><span class="num">3</span>词汇量快测（约 2 分钟）</h2>
+    <p>让软件知道你认识哪些词，从第一天起就能判断视频难度。<em>即将推出。</em></p>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

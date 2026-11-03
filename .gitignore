@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+
+# Build output
+build/
+dist/
+installer/Output/
+
+# Runtime data -- personal learning records and downloaded models never go in a public repo
+data/
+models/
+logs/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+.ovcache/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Extension build output
+extension/node_modules/
+extension/dist/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,36 @@
+# Single source of truth for product identity, version and runtime contracts.
+#
+# Everything else is generated from, or checked against, this file:
+#   python tools/sync_product.py          regenerate derived files
+#   python tools/sync_product.py --check  fail if any derived file drifted (CI)
+#
+# Derived: extension/manifest.json (version, key), extension/src/product.js,
+# installer defines (passed by tools/build.py). Python reads it at runtime.
+
+[product]
+id = "videotutor"
+name = "VideoTutor"
+display_name = "VideoTutor 视频英语学习助手"
+version = "0.1.0"
+publisher = "OTBPS"
+repository = "OTBPS/AIEnglishVideoStudyAssistant"
+# Inno Setup AppId. NEVER change it: it is how an upgrade finds the existing
+# install, and how the uninstaller is located. Changing it breaks every user.
+app_id = "{56D7C3CE-F511-4EF8-B468-640149D0187A}"
+
+[runtime]
+# Inclusive range of localhost ports; the app takes the first free one and
+# the extension probes the same range.
+port_first = 8765
+port_last = 8774
+# Version of the extension <-> backend HTTP API. Bump only on a breaking
+# change, and keep the old version working for one release (ARCHITECTURE.md).
+protocol = 1
+single_instance_mutex = 'Local\VideoTutor-single-instance'
+
+[extension]
+# Public key only: it pins the extension ID on every machine
+# (kedjniaglmeoobkgdeflonfmlpihmndm), so the backend can trust its Origin.
+# The private key was discarded on purpose -- it is not needed to load an
+# unpacked extension, and a public repo must never hold it.
+public_key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAhlDuG0Rx41fhd4diYnOk7h9W0XtoRqbd+Bdc9LBhP62PKlSiWhP4a2WF1/wnF70Jpc036JPrX9foZ+PCCXNUtW83NvvKtLyiO4SZxZm5oInmNChhRT624WijQLvDAlpLMaYnpqCua7NRJahErNdgF4PaN2xQkZE2gT10LkHU9IBf+5vSs4m+oOHuLQN1zw+dp6HS6EGRxRzjT4HY8g3UuEA51wILunIQ87/1reUbe+2Ln44AZxfm5k1IIoMiQZZ++/+Op8kBSPMQ7UnAJ7jJWtmJz+7dIjjjrurcmVBnyW07xKChG7/74nQJ6Huz2vjjDPubj73rLWJ+ZmbKeFuOGwIDAQAB"
