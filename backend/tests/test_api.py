@@ -1,19 +1,25 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
 
+from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.ports import Locations
+from videotutor.app.prewatch import PrewatchService
 from videotutor.app.setup import SetupService
+from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
+from videotutor.core.tasks import TaskSupervisor
 from videotutor.infra.db.database import Database
+from videotutor.infra.db.repositories import SqlitePrewatchRepository, SqliteWordStatusRepository
 from videotutor.infra.settings_store import JsonSettingsStore
 from videotutor.ui.http.api import ApiDeps, create_app
 
-from .conftest import FakeDesktop
+from .conftest import FakeDesktop, FakeLanguageModel, FixedModelProvider, InMemorySecretStore
 from .test_videos import json3, make_service
+from .test_vocab import LEXICON
 
 PORT = 8765
 VIDEO = "iG9CE55wbtY"
@@ -33,18 +39,59 @@ def database(locations: Locations) -> Iterator[Database]:
 
 
 @pytest.fixture
+def models() -> FixedModelProvider:
+    return FixedModelProvider(None)
+
+
+@pytest.fixture
+def tasks() -> Iterator[TaskSupervisor]:
+    t = TaskSupervisor(default_timeout=10)
+    t.start()
+    yield t
+    t.shutdown(grace=2)
+
+
+def build_deps(
+    product: Product,
+    locations: Locations,
+    desktop: FakeDesktop,
+    database: Database,
+    tasks: TaskSupervisor,
+    models: FixedModelProvider,
+    on_activate: Callable[[], None] = lambda: None,
+) -> ApiDeps:
+    store = JsonSettingsStore(locations.settings_file)
+    store.load()
+    videos = make_service(database)
+    vocabulary = VocabularyService(LEXICON, videos, SqliteWordStatusRepository(database), store)
+    return ApiDeps(
+        product=product,
+        setup=SetupService(product, locations, desktop, store, lambda: database.read_only),
+        videos=videos,
+        vocabulary=vocabulary,
+        prewatch=PrewatchService(
+            videos, vocabulary, SqlitePrewatchRepository(database), models, tasks, store
+        ),
+        settings=store,
+        llm_settings=LlmSettingsService(store, InMemorySecretStore(), models),
+        tasks=tasks,
+        on_activate=on_activate,
+        web_dir=locations.web_dir,
+    )
+
+
+@pytest.fixture
 def client(
     product: Product,
     locations: Locations,
     desktop: FakeDesktop,
     activations: list[int],
     database: Database,
+    tasks: TaskSupervisor,
+    models: FixedModelProvider,
 ) -> Iterator[TestClient]:
-    store = JsonSettingsStore(locations.settings_file)
-    store.load()
-    setup = SetupService(product, locations, desktop, store, lambda: database.read_only)
-    deps = ApiDeps(
-        product, setup, make_service(database), lambda: activations.append(1), locations.web_dir
+    deps = build_deps(
+        product, locations, desktop, database, tasks, models, lambda: activations.append(1)
     )
     with TestClient(create_app(deps, PORT), base_url=f"http://127.0.0.1:{PORT}") as c:
         yield c
@@ -113,7 +160,7 @@ def test_video_errors_map_to_status_codes(client: TestClient) -> None:
 
 
 def test_read_only_database_answers_409(
-    product: Product, locations: Locations, desktop: FakeDesktop
+    product: Product, locations: Locations, desktop: FakeDesktop, tasks: TaskSupervisor
 ) -> None:
     from videotutor.infra.db.migrations import MIGRATIONS, Migration
 
@@ -121,10 +168,7 @@ def test_read_only_database_answers_409(
     Database.open(locations.database_file, newer)[0].close()
     db, report = Database.open(locations.database_file)
     assert report.read_only
-    store = JsonSettingsStore(locations.settings_file)
-    store.load()
-    setup = SetupService(product, locations, desktop, store, lambda: db.read_only)
-    deps = ApiDeps(product, setup, make_service(db), lambda: None, locations.web_dir)
+    deps = build_deps(product, locations, desktop, db, tasks, FixedModelProvider(None))
     with TestClient(create_app(deps, PORT), base_url=f"http://127.0.0.1:{PORT}") as c:
         assert c.get("/api/setup/info").json()["database_read_only"] is True
         resp = c.post("/api/videos/open", json={"platform": "youtube", "external_id": VIDEO})
@@ -183,3 +227,84 @@ def test_own_page_and_extension_origins_may_post(
 def test_dns_rebinding_host_is_rejected(client: TestClient) -> None:
     resp = client.get("/api/health", headers={"Host": f"attacker.example:{PORT}"})
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------- vocabulary & pre-watch
+def _with_transcript(client: TestClient) -> None:
+    _open(client)
+    lines = (
+        (0, 3000, "Creativity is as important as literacy."),
+        (3000, 3000, "As Robinson said, children take a chance."),
+    )
+    resp = client.put(
+        f"/api/videos/youtube/{VIDEO}/captions",
+        json={"track": MANUAL, "format": "json3", "body": json3(*lines)},
+    )
+    assert resp.status_code == 200
+
+
+def test_vocabulary_spans_and_word_marks(client: TestClient) -> None:
+    _with_transcript(client)
+    v = client.get(f"/api/videos/youtube/{VIDEO}/vocabulary").json()
+    lemmas = [w["lemma"] for w in v["words"]]
+    assert "robinson" not in lemmas and v["level"] == 3000
+    first_span = v["spans"][0][0]
+    assert first_span[:2] == [0, 10] and lemmas[first_span[2]] == "creativity"
+    assert -1 in [span[2] for span in v["spans"][1]]  # "Robinson": a name
+    before = v["coverage"]
+
+    assert client.put("/api/words/creativity", json={"status": "known"}).status_code == 200
+    after = client.get(f"/api/videos/youtube/{VIDEO}/vocabulary").json()
+    assert after["coverage"] > before
+    assert client.put("/api/words/NotAWord", json={"status": "known"}).status_code == 422
+    assert client.put("/api/words/creativity", json={"status": "bogus"}).status_code == 422
+
+
+def test_prewatch_endpoints(client: TestClient, models: FixedModelProvider) -> None:
+    _with_transcript(client)
+    url = f"/api/videos/youtube/{VIDEO}/prewatch"
+    glosses = f"/api/videos/youtube/{VIDEO}/glosses"
+    assert client.get(url).json()["status"] == "not_configured"
+    assert client.post(glosses, json={"lemma": "literacy"}).status_code == 409
+
+    models.model = FakeLanguageModel(
+        {
+            "glosses": [
+                {
+                    "lemma": "literacy",
+                    "part_of_speech": "n.",
+                    "definition_en": "being able to read",
+                    "definition_zh": "读写能力",
+                }
+            ]
+        },
+    )
+    g = client.post(glosses, json={"lemma": "literacy"})
+    assert g.status_code == 200 and g.json()["definition_zh"] == "读写能力"
+    assert client.get(url).json()["status"] == "idle"
+    assert client.post(glosses, json={"lemma": "Bad"}).status_code == 422
+
+
+def test_settings_endpoints(client: TestClient, models: FixedModelProvider) -> None:
+    assert client.get("/api/settings").json() == {"vocabulary_level": 3000, "auto_prewatch": True}
+    changed = client.put("/api/settings", json={"vocabulary_level": 6000}).json()
+    assert changed["vocabulary_level"] == 6000
+    assert client.put("/api/settings", json={"vocabulary_level": 10}).status_code == 422
+
+    llm = client.get("/api/settings/llm").json()
+    assert llm == {
+        "provider": "claude",
+        "model": "claude-opus-5-5",
+        "base_url": "",
+        "has_key": False,
+    }
+    body = {"provider": "claude", "model": "claude-opus-5-5", "api_key": "sk-ant-x"}
+    failed = client.put("/api/settings/llm", json=body).json()  # provider returns no model yet
+    assert failed["ok"] is False and failed["config"]["has_key"] is True
+    assert "sk-ant" not in str(failed)
+
+    models.model = FakeLanguageModel({"ok": True})
+    assert client.put("/api/settings/llm", json=body).json()["ok"] is True
+    assert client.delete("/api/settings/llm/key").json()["has_key"] is False
+    bad = {"provider": "openai_compatible", "model": "m", "base_url": "http://x"}
+    assert client.put("/api/settings/llm", json=bad).status_code == 422

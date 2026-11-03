@@ -16,12 +16,24 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from videotutor.app.errors import InvalidInputError, NotFoundError, StorageReadOnlyError
+from videotutor.app.errors import (
+    InvalidInputError,
+    LlmError,
+    LlmNotConfiguredError,
+    LlmUnavailableError,
+    NotFoundError,
+    StorageReadOnlyError,
+)
+from videotutor.app.llm_settings import LlmSettingsService
+from videotutor.app.prewatch import PrewatchService
+from videotutor.app.settings import SettingsStore
 from videotutor.app.setup import SetupService
 from videotutor.app.videos import VideoService
+from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
+from videotutor.core.tasks import TaskSupervisor, TaskTimeout
 
-from .routes import system, videos
+from .routes import learning, settings, system, videos
 from .security import local_only_guard
 
 
@@ -30,15 +42,31 @@ class ApiDeps:
     product: Product
     setup: SetupService
     videos: VideoService
+    vocabulary: VocabularyService
+    prewatch: PrewatchService
+    settings: SettingsStore
+    llm_settings: LlmSettingsService
+    tasks: TaskSupervisor
     on_activate: Callable[[], None]
     web_dir: Path
 
 
+# Starlette uses the handler of the closest class in the exception's MRO.
 _ERRORS: dict[type[Exception], int] = {
     NotFoundError: 404,
     StorageReadOnlyError: 409,
     InvalidInputError: 422,
+    LlmNotConfiguredError: 409,
+    LlmUnavailableError: 503,
+    LlmError: 502,
+    TaskTimeout: 504,
 }
+
+
+def _detail(exc: Exception) -> str:
+    # Language-model errors carry a message written for the learner; the raw
+    # provider text stays in the log.
+    return exc.user_message if isinstance(exc, LlmError) else str(exc)
 
 
 def create_app(deps: ApiDeps, port: int) -> FastAPI:
@@ -51,12 +79,14 @@ def create_app(deps: ApiDeps, port: int) -> FastAPI:
     for exc_type, status in _ERRORS.items():
 
         def handler(_: Request, exc: Exception, status: int = status) -> JSONResponse:
-            return JSONResponse({"error": type(exc).__name__, "detail": str(exc)}, status)
+            return JSONResponse({"error": type(exc).__name__, "detail": _detail(exc)}, status)
 
         app.add_exception_handler(exc_type, handler)
 
     app.include_router(system.router(product, deps.setup, deps.on_activate))
     app.include_router(videos.router(deps.videos))
+    app.include_router(learning.router(deps.vocabulary, deps.prewatch, deps.tasks))
+    app.include_router(settings.router(deps.settings, deps.llm_settings, deps.tasks))
 
     @app.get("/", include_in_schema=False)
     def index() -> RedirectResponse:

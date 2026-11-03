@@ -13,9 +13,9 @@ Rules for changing this file (backward compatibility):
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = 1
 
@@ -35,6 +35,19 @@ class Settings(BaseModel):
 
     first_run_done: bool = False
     """The setup wizard has been completed once."""
+
+    # Added in 0.3.0 (schema 1 still: new fields with defaults need no migration).
+    vocabulary_level: int = Field(default=3000, ge=500, le=40000)
+    """Words up to this frequency rank count as known unless marked otherwise.
+    3000 word families give ~95% coverage of TV English (Webb & Rodgers)."""
+
+    auto_prewatch: bool = True
+    """Generate glosses and questions as soon as a video's transcript is stored."""
+
+    llm_provider: Literal["claude", "openai_compatible"] = "claude"
+    llm_model: str = Field(default="claude-opus-5-5", min_length=1, max_length=100)
+    llm_base_url: str = Field(default="", max_length=500)
+    """Only for openai_compatible, e.g. https://api.deepseek.com/v1."""
 
 
 class SettingsStore(Protocol):

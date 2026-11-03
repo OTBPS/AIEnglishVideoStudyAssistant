@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from videotutor.app.ports import TranscriptInfo
 from videotutor.app.videos import VideoService
-from videotutor.domain.video import CaptionTrack, Platform, TrackKind, VideoRef
+from videotutor.domain.video import CaptionTrack, Platform, TrackKind
 from videotutor.domain.watch import WatchEvent, WatchSession
 
 from ..schemas import (
@@ -23,13 +23,7 @@ from ..schemas import (
     TranscriptInfoOut,
     TranscriptOut,
 )
-
-
-def _ref(platform: Platform, external_id: str) -> VideoRef:
-    try:
-        return VideoRef(platform, external_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+from .common import video_ref
 
 
 def _track(t: TrackIn) -> CaptionTrack:
@@ -54,7 +48,7 @@ def router(videos: VideoService) -> APIRouter:
     @r.post("/videos/open")
     def open_video(body: OpenVideoIn) -> OpenVideoOut:
         opened = videos.open_video(
-            _ref(body.platform, body.external_id),
+            video_ref(body.platform, body.external_id),
             title=body.title,
             url=body.url,
             duration_ms=body.duration_ms,
@@ -78,13 +72,13 @@ def router(videos: VideoService) -> APIRouter:
     @r.put("/videos/{platform}/{external_id}/captions")
     def store_captions(platform: Platform, external_id: str, body: CaptionsIn) -> TranscriptInfoOut:
         info = videos.store_captions(
-            _ref(platform, external_id), _track(body.track), body.format, body.body
+            video_ref(platform, external_id), _track(body.track), body.format, body.body
         )
         return _info(info)
 
     @r.get("/videos/{platform}/{external_id}/transcript")
     def transcript(platform: Platform, external_id: str) -> TranscriptOut:
-        t = videos.transcript(_ref(platform, external_id))
+        t = videos.transcript(video_ref(platform, external_id))
         return TranscriptOut(
             language=t.language,
             kind=t.kind.value,

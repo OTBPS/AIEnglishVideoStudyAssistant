@@ -13,13 +13,13 @@ from videotutor.bootstrap import Application, Options, smoke_test
 from videotutor.core.product import Product
 from videotutor.infra.single_instance import RuntimeFile
 
-from .conftest import FakeDesktop
+from .conftest import FakeDesktop, InMemorySecretStore
 
 HEADLESS = Options(tray=False, open_browser=False)
 
 
 def test_start_serve_stop(product: Product, locations: Locations, desktop: FakeDesktop) -> None:
-    app = Application(product, locations, HEADLESS, desktop=desktop)
+    app = Application(product, locations, HEADLESS, desktop=desktop, secrets=InMemorySecretStore())
     app.start()
     try:
         assert app.lifecycle.state is AppState.RUNNING
@@ -37,7 +37,13 @@ def test_start_serve_stop(product: Product, locations: Locations, desktop: FakeD
 def test_run_opens_home_and_returns_on_quit(
     product: Product, locations: Locations, desktop: FakeDesktop
 ) -> None:
-    app = Application(product, locations, Options(tray=False, open_browser=True), desktop=desktop)
+    app = Application(
+        product,
+        locations,
+        Options(tray=False, open_browser=True),
+        desktop=desktop,
+        secrets=InMemorySecretStore(),
+    )
     result: list[int] = []
     t = threading.Thread(target=lambda: result.append(app.run()))
     t.start()
@@ -58,7 +64,7 @@ def test_startup_failure_rolls_back(
         raise OSError("all ports taken")
 
     monkeypatch.setattr("videotutor.bootstrap.bind_first_free", no_ports)
-    app = Application(product, locations, HEADLESS, desktop=desktop)
+    app = Application(product, locations, HEADLESS, desktop=desktop, secrets=InMemorySecretStore())
     with pytest.raises(OSError, match="all ports taken"):
         app.start()
     assert app.lifecycle.state is AppState.STOPPED

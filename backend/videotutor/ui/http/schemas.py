@@ -96,3 +96,102 @@ class RecentVideoOut(BaseModel):
     watched_ms: int
     max_position_ms: int
     has_transcript: bool
+
+
+# ---------------------------------------------------------------- vocabulary (0.3.0)
+LEMMA_PATTERN = r"^[a-z]+$"
+
+
+class WordOut(BaseModel):
+    lemma: str
+    count: int
+    rank: int | None
+    status: str | None
+    known: bool
+
+
+class VocabularyOut(BaseModel):
+    level: int
+    token_count: int
+    known_count: int
+    coverage: float
+    difficulty: str
+    words: list[WordOut]
+    # Per transcript segment: [start, end, index into `words`], or index -1 for a name.
+    # The side panel highlights by these spans, so tokenising lives only in Python.
+    spans: list[list[list[int]]]
+
+
+class WordStatusIn(BaseModel):
+    status: Literal["known", "learning", "ignored"] | None
+
+
+class GlossOut(BaseModel):
+    lemma: str
+    part_of_speech: str
+    definition_en: str
+    definition_zh: str
+    example: str
+
+
+class GlossIn(BaseModel):
+    lemma: str = Field(pattern=LEMMA_PATTERN, max_length=40)
+
+
+class PreviewWordOut(BaseModel):
+    word: WordOut
+    example: str
+    gloss: GlossOut | None
+
+
+class QuestionOut(BaseModel):
+    question: str
+    hint_zh: str
+
+
+class GuideOut(BaseModel):
+    prediction_prompt: str
+    questions: list[QuestionOut]
+    based_on_partial_transcript: bool
+
+
+class PrewatchOut(BaseModel):
+    status: str
+    error: str | None
+    words: list[PreviewWordOut]
+    guide: GuideOut | None
+
+
+class PrewatchStartIn(BaseModel):
+    auto: bool = False
+
+
+# ---------------------------------------------------------------- settings (0.3.0)
+class SettingsOut(BaseModel):
+    vocabulary_level: int
+    auto_prewatch: bool
+
+
+class SettingsIn(BaseModel):
+    vocabulary_level: int | None = Field(default=None, ge=500, le=40000)
+    auto_prewatch: bool | None = None
+
+
+class LlmConfigOut(BaseModel):
+    provider: str
+    model: str
+    base_url: str
+    has_key: bool
+
+
+class LlmConfigIn(BaseModel):
+    provider: Literal["claude", "openai_compatible"]
+    model: str = Field(min_length=1, max_length=100)
+    base_url: str = Field(default="", max_length=500)
+    api_key: str | None = Field(default=None, max_length=500)
+
+
+class LlmTestOut(BaseModel):
+    ok: bool
+    error: str | None
+    config: LlmConfigOut

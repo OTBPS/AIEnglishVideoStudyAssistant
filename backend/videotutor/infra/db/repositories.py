@@ -6,12 +6,15 @@ module sees a sqlite3.Row. Timestamps are stored as ISO-8601 UTC strings.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 
 from videotutor.app.ports import RecentVideo, TranscriptInfo
+from videotutor.domain.prewatch import Gloss, PrewatchGuide, Question
 from videotutor.domain.transcript import Segment, Transcript
 from videotutor.domain.video import Platform, TrackKind, Video, VideoRef
+from videotutor.domain.vocab import WordStatus
 from videotutor.domain.watch import WatchEvent, WatchSession, WatchState
 
 from .database import Database
@@ -227,3 +230,95 @@ class SqliteWatchRepository:
                 (_ts(now),),
             )
         return cur.rowcount
+
+
+class SqliteWordStatusRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def all(self) -> dict[str, WordStatus]:
+        with self._db.read() as c:
+            rows = c.execute("SELECT lemma, status FROM word_status").fetchall()
+        return {r["lemma"]: WordStatus(r["status"]) for r in rows}
+
+    def set(self, lemma: str, status: WordStatus | None, now: datetime) -> None:
+        with self._db.write() as c:
+            if status is None:
+                c.execute("DELETE FROM word_status WHERE lemma = ?", (lemma,))
+            else:
+                c.execute(
+                    "INSERT INTO word_status (lemma, status, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT (lemma) DO UPDATE SET status = excluded.status, "
+                    "updated_at = excluded.updated_at",
+                    (lemma, status.value, _ts(now)),
+                )
+
+
+class SqlitePrewatchRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def glosses(self, video_id: int) -> dict[str, Gloss]:
+        with self._db.read() as c:
+            rows = c.execute("SELECT * FROM glosses WHERE video_id = ?", (video_id,)).fetchall()
+        return {
+            r["lemma"]: Gloss(
+                r["lemma"],
+                r["part_of_speech"],
+                r["definition_en"],
+                r["definition_zh"],
+                r["example"],
+            )
+            for r in rows
+        }
+
+    def save_glosses(self, video_id: int, glosses: list[Gloss], model: str, now: datetime) -> None:
+        with self._db.write() as c:
+            c.executemany(
+                "INSERT OR REPLACE INTO glosses (video_id, lemma, part_of_speech, definition_en, "
+                "definition_zh, example, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        video_id,
+                        g.lemma,
+                        g.part_of_speech,
+                        g.definition_en,
+                        g.definition_zh,
+                        g.example,
+                        model,
+                        _ts(now),
+                    )
+                    for g in glosses
+                ],
+            )
+
+    def guide(self, video_id: int) -> PrewatchGuide | None:
+        with self._db.read() as c:
+            r = c.execute(
+                "SELECT * FROM prewatch_guides WHERE video_id = ?", (video_id,)
+            ).fetchone()
+        if r is None:
+            return None
+        questions = tuple(
+            Question(q["question"], q["hint_zh"]) for q in json.loads(r["questions_json"])
+        )
+        return PrewatchGuide(r["prediction_prompt"], questions, bool(r["partial"]))
+
+    def save_guide(self, video_id: int, guide: PrewatchGuide, model: str, now: datetime) -> None:
+        questions = json.dumps(
+            [{"question": q.question, "hint_zh": q.hint_zh} for q in guide.questions],
+            ensure_ascii=False,
+        )
+        with self._db.write() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO prewatch_guides (video_id, prediction_prompt, "
+                "questions_json, partial, model, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    video_id,
+                    guide.prediction_prompt,
+                    questions,
+                    int(guide.based_on_partial_transcript),
+                    model,
+                    _ts(now),
+                ),
+            )

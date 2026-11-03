@@ -70,6 +70,7 @@ def resolve(app_name: str) -> Locations:
         settings_file=home / "settings.json",
         runtime_file=home / "runtime.json",
         database_file=home / "data" / "tutor.db",
+        lexicon_file=pkg / "assets" / "lexicon_en.tsv.gz",
     )
 
 

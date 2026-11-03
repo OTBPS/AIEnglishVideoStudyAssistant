@@ -15,20 +15,28 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from videotutor.app.lifecycle import AppState, Lifecycle
-from videotutor.app.ports import Desktop, Locations
+from videotutor.app.llm_settings import LlmSettingsService
+from videotutor.app.ports import Desktop, Locations, SecretStore
+from videotutor.app.prewatch import PrewatchService
 from videotutor.app.setup import SetupService
 from videotutor.app.videos import VideoService
+from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
 from videotutor.infra.captions.youtube import YouTubeCaptionDecoder
 from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
+    SqlitePrewatchRepository,
     SqliteTranscriptRepository,
     SqliteVideoRepository,
     SqliteWatchRepository,
+    SqliteWordStatusRepository,
 )
 from videotutor.infra.desktop import WindowsDesktop
 from videotutor.infra.http_server import HttpServer, bind_first_free
+from videotutor.infra.lexicon import FileLexicon
+from videotutor.infra.llm.provider import ConfiguredLanguageModelProvider
+from videotutor.infra.secrets import KeyringSecretStore
 from videotutor.infra.settings_store import JsonSettingsStore
 from videotutor.infra.single_instance import RuntimeFile
 from videotutor.ui.http.api import ApiDeps, create_app
@@ -53,11 +61,13 @@ class Application:
         options: Options,
         *,
         desktop: Desktop | None = None,
+        secrets: SecretStore | None = None,
     ) -> None:
         self.product = product
         self.locations = locations
         self.options = options
         self.desktop: Desktop = desktop or WindowsDesktop()
+        self.secrets: SecretStore = secrets or KeyringSecretStore(product.name)
         self.lifecycle = Lifecycle()
         self.settings = JsonSettingsStore(locations.settings_file)
         self.tasks = TaskSupervisor()
@@ -66,6 +76,8 @@ class Application:
         )
         self._db: Database | None = None
         self._videos: VideoService | None = None
+        self._vocabulary: VocabularyService | None = None
+        self._prewatch: PrewatchService | None = None
         self._runtime = RuntimeFile(locations.runtime_file)
         self._server: HttpServer | None = None
         self._tray: Tray | None = None
@@ -76,6 +88,12 @@ class Application:
         if self._videos is None:
             raise RuntimeError("application not started")
         return self._videos
+
+    @property
+    def vocabulary(self) -> VocabularyService:
+        if self._vocabulary is None:
+            raise RuntimeError("application not started")
+        return self._vocabulary
 
     def _database_read_only(self) -> bool:
         return self._db is not None and self._db.read_only
@@ -110,11 +128,35 @@ class Application:
             self.tasks.start()
             self.lifecycle.add_stop_hook("tasks", self.tasks.shutdown)
 
+            lexicon = FileLexicon.load(self.locations.lexicon_file)
+            models = ConfiguredLanguageModelProvider(self.settings, self.secrets)
+            self._vocabulary = VocabularyService(
+                lexicon, self._videos, SqliteWordStatusRepository(db), self.settings
+            )
+            self._prewatch = PrewatchService(
+                self._videos,
+                self._vocabulary,
+                SqlitePrewatchRepository(db),
+                models,
+                self.tasks,
+                self.settings,
+            )
+            llm_settings = LlmSettingsService(self.settings, self.secrets, models)
+
             sock = bind_first_free(self.product.ports)
             port = sock.getsockname()[1]
             api = create_app(
                 ApiDeps(
-                    self.product, self.setup, self._videos, self.activate, self.locations.web_dir
+                    product=self.product,
+                    setup=self.setup,
+                    videos=self._videos,
+                    vocabulary=self._vocabulary,
+                    prewatch=self._prewatch,
+                    settings=self.settings,
+                    llm_settings=llm_settings,
+                    tasks=self.tasks,
+                    on_activate=self.activate,
+                    web_dir=self.locations.web_dir,
                 ),
                 port,
             )
@@ -225,6 +267,7 @@ def smoke_test(product: Product, locations: Locations) -> int:
         if app.tasks.submit("smoke-ping", ping).result(timeout=5) != "pong":
             problems.append("task supervisor round trip failed")
         problems += _smoke_database(app.videos)
+        problems += _smoke_learning(app.vocabulary, product.name)
         if not locations.icon_file.exists():
             problems.append(f"missing {locations.icon_file}")
     finally:
@@ -260,4 +303,25 @@ def _smoke_database(videos: VideoService) -> list[str]:
     )
     if (session.state, session.watched_ms) != (WatchState.PAUSED, 1000):
         problems.append(f"watch session ended as {session.state}/{session.watched_ms}")
+    return problems
+
+
+def _smoke_learning(vocabulary: VocabularyService, app_name: str) -> list[str]:
+    """Lexicon bundled and readable; vocabulary analysis runs; the OS credential
+    store (where API keys live) works from the packaged exe."""
+    from videotutor.domain.video import Platform, VideoRef
+
+    problems: list[str] = []
+    profile = vocabulary.for_video(VideoRef(Platform.YOUTUBE, "smoketest00")).profile
+    if profile.token_count != 1 or profile.words[0].lemma != "hi":
+        problems.append(f"vocabulary analysis gave {profile!r}")
+    store = KeyringSecretStore(f"{app_name}-smoketest")
+    try:
+        store.set("probe", "ok")
+        if store.get("probe") != "ok":
+            problems.append("credential store round trip failed")
+    except Exception as exc:  # noqa: BLE001 -- report any backend failure as a smoke problem
+        problems.append(f"credential store unusable: {type(exc).__name__}: {exc}")
+    finally:
+        store.delete("probe")
     return problems

@@ -11,6 +11,8 @@ dependencies = [
     "uvicorn>=0.32",
     "pystray>=0.19",
     "pillow>=11.0",
+    "anthropic>=2.4",
+    "keyring>=25.7",
 ]
 
 [dependency-groups]
@@ -22,6 +24,8 @@ dev = [
     "mypy>=1.13",
     "import-linter>=2.1",
     "pyinstaller>=6.11",
+    "wordfreq>=3.1",
+    "simplemma>=2.0",
 ]
 
 [tool.uv]
@@ -71,8 +75,14 @@ ignore = [
     "S607",
 ]
 
+[tool.ruff.lint.pylint]
+# Services take their collaborators through the constructor (bootstrap wires
+# them); 5 is too few for that style without inventing parameter objects.
+max-args = 8
+max-positional-args = 8
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "PLR0913", "PLW0603", "S108", "S310"]
+"tests/**" = ["S101", "S105", "S106", "PLR0913", "PLR0917", "PLW0603", "S108", "S310"]
 
 # ---------------------------------------------------------------- types
 [tool.mypy]

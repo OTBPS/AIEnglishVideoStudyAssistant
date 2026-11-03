@@ -82,6 +82,38 @@ MIGRATIONS: tuple[Migration, ...] = (
         CREATE INDEX watch_events_session ON watch_events (session_id, id);
         """,
     ),
+    Migration(
+        2,
+        "word knowledge, glosses, pre-watch guides",
+        """
+        CREATE TABLE word_status (
+            lemma       TEXT PRIMARY KEY,
+            status      TEXT NOT NULL CHECK (status IN ('known', 'learning', 'ignored')),
+            updated_at  TEXT NOT NULL
+        ) WITHOUT ROWID;
+
+        CREATE TABLE glosses (
+            video_id        INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+            lemma           TEXT NOT NULL,
+            part_of_speech  TEXT NOT NULL,
+            definition_en   TEXT NOT NULL,
+            definition_zh   TEXT NOT NULL,
+            example         TEXT NOT NULL,
+            model           TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            PRIMARY KEY (video_id, lemma)
+        ) WITHOUT ROWID;
+
+        CREATE TABLE prewatch_guides (
+            video_id           INTEGER PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
+            prediction_prompt  TEXT NOT NULL,
+            questions_json     TEXT NOT NULL,
+            partial            INTEGER NOT NULL DEFAULT 0,
+            model              TEXT NOT NULL,
+            created_at         TEXT NOT NULL
+        );
+        """,
+    ),
 )
 
 

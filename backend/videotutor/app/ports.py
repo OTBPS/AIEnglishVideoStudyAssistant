@@ -10,10 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
+from videotutor.domain.prewatch import Gloss, PrewatchGuide
 from videotutor.domain.transcript import RawCue, Transcript
 from videotutor.domain.video import TrackKind, Video, VideoRef
+from videotutor.domain.vocab import WordStatus
 from videotutor.domain.watch import WatchEvent, WatchSession
 
 
@@ -36,6 +38,7 @@ class Locations:
     settings_file: Path
     runtime_file: Path
     database_file: Path
+    lexicon_file: Path
 
 
 class Desktop(Protocol):
@@ -109,3 +112,54 @@ class CaptionDecoder(Protocol):
     def formats(self) -> frozenset[str]: ...
 
     def decode(self, fmt: str, body: str) -> list[RawCue]: ...
+
+
+# ---------------------------------------------------------------- vocabulary
+class WordStatusRepository(Protocol):
+    def all(self) -> dict[str, WordStatus]: ...
+
+    def set(self, lemma: str, status: WordStatus | None, now: datetime) -> None:
+        """None removes the learner's mark (the frequency rule applies again)."""
+        ...
+
+
+class PrewatchRepository(Protocol):
+    def glosses(self, video_id: int) -> dict[str, Gloss]: ...
+
+    def save_glosses(
+        self, video_id: int, glosses: list[Gloss], model: str, now: datetime
+    ) -> None: ...
+
+    def guide(self, video_id: int) -> PrewatchGuide | None: ...
+
+    def save_guide(
+        self, video_id: int, guide: PrewatchGuide, model: str, now: datetime
+    ) -> None: ...
+
+
+# ---------------------------------------------------------------- language model & secrets
+class LanguageModel(Protocol):
+    """One structured request. Implementations raise app.errors.LlmError subclasses."""
+
+    @property
+    def model_name(self) -> str: ...
+
+    def generate_json(
+        self, *, system: str, prompt: str, schema: dict[str, Any], max_tokens: int
+    ) -> dict[str, Any]: ...
+
+
+class LanguageModelProvider(Protocol):
+    def current(self) -> LanguageModel | None:
+        """The model the settings describe, or None when no key is configured."""
+        ...
+
+
+class SecretStore(Protocol):
+    """Where API keys live: never in settings.json, never in logs."""
+
+    def get(self, name: str) -> str | None: ...
+
+    def set(self, name: str, value: str) -> None: ...
+
+    def delete(self, name: str) -> None: ...

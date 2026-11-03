@@ -73,7 +73,7 @@ class VideoService:
     def store_captions(
         self, ref: VideoRef, track: CaptionTrack, fmt: str, body: str
     ) -> TranscriptInfo:
-        video = self._require_video(ref)
+        video = self.require_video(ref)
         if fmt not in self._decoder.formats():
             raise InvalidInputError(f"unsupported caption format {fmt!r}")
         try:
@@ -92,7 +92,7 @@ class VideoService:
         return info
 
     def transcript(self, ref: VideoRef) -> Transcript:
-        video = self._require_video(ref)
+        video = self.require_video(ref)
         transcript = self._transcripts.best(video.id)
         if transcript is None:
             raise NotFoundError(f"no transcript for {ref.external_id}")
@@ -117,7 +117,7 @@ class VideoService:
     def recent(self, limit: int = 20) -> list[RecentVideo]:
         return self._videos.recent(max(1, min(limit, 100)))
 
-    def _require_video(self, ref: VideoRef) -> Video:
+    def require_video(self, ref: VideoRef) -> Video:
         video = self._videos.get(ref)
         if video is None:
             raise NotFoundError(f"unknown video {ref.platform}/{ref.external_id}")
