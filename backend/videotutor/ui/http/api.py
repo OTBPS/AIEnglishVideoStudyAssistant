@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from videotutor.app.comprehension import ComprehensionService
 from videotutor.app.errors import (
     InvalidInputError,
     LlmError,
@@ -26,6 +27,7 @@ from videotutor.app.errors import (
 )
 from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.prewatch import PrewatchService
+from videotutor.app.review import ReviewService
 from videotutor.app.settings import SettingsStore
 from videotutor.app.setup import SetupService
 from videotutor.app.videos import VideoService
@@ -33,7 +35,7 @@ from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor, TaskTimeout
 
-from .routes import learning, settings, system, videos
+from .routes import learning, review, settings, system, videos
 from .security import local_only_guard
 
 
@@ -44,6 +46,8 @@ class ApiDeps:
     videos: VideoService
     vocabulary: VocabularyService
     prewatch: PrewatchService
+    review: ReviewService
+    comprehension: ComprehensionService
     settings: SettingsStore
     llm_settings: LlmSettingsService
     tasks: TaskSupervisor
@@ -96,7 +100,8 @@ def create_app(deps: ApiDeps, port: int) -> FastAPI:
 
     app.include_router(system.router(product, deps.setup, deps.on_activate))
     app.include_router(videos.router(deps.videos))
-    app.include_router(learning.router(deps.vocabulary, deps.prewatch, deps.tasks))
+    app.include_router(learning.router(deps.vocabulary, deps.prewatch, deps.review, deps.tasks))
+    app.include_router(review.router(deps.review, deps.comprehension, deps.tasks))
     app.include_router(settings.router(deps.settings, deps.llm_settings, deps.tasks))
 
     @app.get("/", include_in_schema=False)

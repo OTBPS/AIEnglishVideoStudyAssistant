@@ -5,16 +5,25 @@ from collections.abc import Callable, Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from videotutor.app.comprehension import ComprehensionService
+from videotutor.app.exercises import ExerciseFactory
 from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.ports import Locations
 from videotutor.app.prewatch import PrewatchService
+from videotutor.app.review import ReviewService
 from videotutor.app.setup import SetupService
 from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
 from videotutor.infra.db.database import Database
-from videotutor.infra.db.repositories import SqlitePrewatchRepository, SqliteWordStatusRepository
+from videotutor.infra.db.repositories import (
+    SqliteAttemptRepository,
+    SqliteCardRepository,
+    SqlitePrewatchRepository,
+    SqliteWordStatusRepository,
+)
 from videotutor.infra.settings_store import JsonSettingsStore
+from videotutor.infra.srs import FsrsScheduler
 from videotutor.ui.http.api import ApiDeps, create_app
 
 from .conftest import FakeDesktop, FakeLanguageModel, FixedModelProvider, InMemorySecretStore
@@ -64,14 +73,26 @@ def build_deps(
     store.load()
     videos = make_service(database)
     vocabulary = VocabularyService(LEXICON, videos, SqliteWordStatusRepository(database), store)
+    prewatch_repo = SqlitePrewatchRepository(database)
+    prewatch = PrewatchService(videos, vocabulary, prewatch_repo, models, tasks, store)
+    attempts = SqliteAttemptRepository(database)
+    review = ReviewService(
+        cards=SqliteCardRepository(database),
+        attempts=attempts,
+        srs=FsrsScheduler(fuzz=False),
+        exercises=ExerciseFactory(prewatch_repo, LEXICON, models),
+        videos=videos,
+        vocabulary=vocabulary,
+        prefetch_gloss=prewatch.prefetch_gloss,
+    )
     return ApiDeps(
         product=product,
         setup=SetupService(product, locations, desktop, store, lambda: database.read_only),
         videos=videos,
         vocabulary=vocabulary,
-        prewatch=PrewatchService(
-            videos, vocabulary, SqlitePrewatchRepository(database), models, tasks, store
-        ),
+        prewatch=prewatch,
+        review=review,
+        comprehension=ComprehensionService(videos, prewatch_repo, attempts, models),
         settings=store,
         llm_settings=LlmSettingsService(store, InMemorySecretStore(), models),
         tasks=tasks,
@@ -309,3 +330,63 @@ def test_settings_endpoints(client: TestClient, models: FixedModelProvider) -> N
     assert client.delete("/api/settings/llm/key").json()["has_key"] is False
     bad = {"provider": "openai_compatible", "model": "m", "base_url": "http://x"}
     assert client.put("/api/settings/llm", json=bad).status_code == 422
+
+
+# ---------------------------------------------------------------- review
+def test_review_endpoints(client: TestClient, models: FixedModelProvider) -> None:
+    _with_transcript(client)
+    models.model = FakeLanguageModel(
+        {
+            "glosses": [
+                {
+                    "lemma": "literacy",
+                    "part_of_speech": "n.",
+                    "definition_en": "being able to read",
+                    "definition_zh": "读写能力",
+                }
+            ]
+        }
+    )
+    assert (
+        client.post(f"/api/videos/youtube/{VIDEO}/glosses", json={"lemma": "literacy"}).status_code
+        == 200
+    )
+    collect = {"status": "learning", "platform": "youtube", "external_id": VIDEO}
+    assert client.put("/api/words/literacy", json=collect).status_code == 200
+    assert client.get("/api/review/summary").json() == {
+        "due": 1,
+        "total": 1,
+        "reviewed_today": 0,
+        "waiting_for_gloss": 0,
+    }
+
+    nxt = client.post(
+        "/api/review/next",
+        json={"context": "postwatch", "platform": "youtube", "external_id": VIDEO},
+    ).json()["exercise"]
+    # Only one meaning exists, so no distractors: a spelling exercise (word hidden).
+    assert nxt["kind"] == "spell" and nxt["word"] is None and nxt["hint_zh"] == "读写能力"
+    answer = "literacy"
+    res = client.post("/api/review/answer", json={"exercise_id": nxt["id"], "answer": answer})
+    assert res.status_code == 200 and res.json()["grade"] == "good"
+    assert (
+        client.post(
+            "/api/review/answer", json={"exercise_id": nxt["id"], "answer": "x"}
+        ).status_code
+        == 404
+    )
+    done = client.post(
+        "/api/review/next",
+        json={
+            "context": "postwatch",
+            "platform": "youtube",
+            "external_id": VIDEO,
+            "exclude": ["literacy"],
+        },
+    )
+    assert done.json() == {"exercise": None}
+    assert client.post("/api/review/next", json={"context": "postwatch"}).status_code == 422
+    assert client.get("/api/review/summary").json()["reviewed_today"] == 1
+
+    missing = client.post(f"/api/videos/youtube/{VIDEO}/comprehension/0", json={"answer": "x"})
+    assert missing.status_code == 404  # no questions were generated for this video

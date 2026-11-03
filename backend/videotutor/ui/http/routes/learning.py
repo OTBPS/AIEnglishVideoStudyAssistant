@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Path
 
 from videotutor.app.prewatch import PrewatchService, PrewatchState
+from videotutor.app.review import ReviewService
 from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.tasks import TaskSupervisor
 from videotutor.domain.prewatch import Gloss
@@ -75,7 +76,10 @@ def _prewatch(s: PrewatchState) -> PrewatchOut:
 
 
 def router(
-    vocabulary: VocabularyService, prewatch: PrewatchService, tasks: TaskSupervisor
+    vocabulary: VocabularyService,
+    prewatch: PrewatchService,
+    review: ReviewService,
+    tasks: TaskSupervisor,
 ) -> APIRouter:
     r = APIRouter(prefix="/api")
 
@@ -100,7 +104,13 @@ def router(
     def set_word_status(
         lemma: Annotated[str, Path(pattern=LEMMA_PATTERN, max_length=40)], body: WordStatusIn
     ) -> dict[str, str | None]:
-        vocabulary.set_status(lemma, WordStatus(body.status) if body.status else None)
+        source = (
+            video_ref(body.platform, body.external_id)
+            if body.platform is not None and body.external_id is not None
+            else None
+        )
+        status = WordStatus(body.status) if body.status else None
+        review.set_word_status(lemma, status, source)  # LEARNING also creates a review card
         return {"lemma": lemma, "status": body.status}
 
     @r.get("/videos/{platform}/{external_id}/prewatch")

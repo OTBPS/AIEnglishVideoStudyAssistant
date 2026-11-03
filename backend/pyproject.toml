@@ -13,6 +13,7 @@ dependencies = [
     "pillow>=11.0",
     "anthropic>=2.4",
     "keyring>=25.7",
+    "fsrs>=6.0",
 ]
 
 [dependency-groups]
@@ -82,7 +83,7 @@ max-args = 8
 max-positional-args = 8
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "PLR0913", "PLR0917", "PLW0603", "S108", "S310"]
+"tests/**" = ["S101", "S105", "S106", "PLR0913", "PLR0917", "PLW0603", "S108", "S310", "S311"]
 
 # ---------------------------------------------------------------- types
 [tool.mypy]

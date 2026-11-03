@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from videotutor.domain.prewatch import Gloss, PrewatchGuide
+from videotutor.domain.review import Card, Grade, SrsState
 from videotutor.domain.transcript import RawCue, Transcript
 from videotutor.domain.video import TrackKind, Video, VideoRef
 from videotutor.domain.vocab import WordStatus
@@ -126,6 +127,8 @@ class WordStatusRepository(Protocol):
 class PrewatchRepository(Protocol):
     def glosses(self, video_id: int) -> dict[str, Gloss]: ...
 
+    def latest_gloss(self, lemma: str) -> Gloss | None: ...
+
     def save_glosses(
         self, video_id: int, glosses: list[Gloss], model: str, now: datetime
     ) -> None: ...
@@ -163,3 +166,60 @@ class SecretStore(Protocol):
     def set(self, name: str, value: str) -> None: ...
 
     def delete(self, name: str) -> None: ...
+
+
+# ---------------------------------------------------------------- review (M3)
+class SpacedRepetition(Protocol):
+    """The scheduling algorithm (FSRS today), kept replaceable."""
+
+    def new_state(self, now: datetime) -> SrsState: ...
+
+    def review(self, state: SrsState, grade: Grade, now: datetime) -> SrsState: ...
+
+    def retrievability(self, state: SrsState, now: datetime) -> float: ...
+
+
+@dataclass(frozen=True)
+class Attempt:
+    lemma: str | None
+    video_id: int | None
+    kind: str  # an ExerciseKind name, or "comprehension"
+    prompt: str
+    answer: str
+    grade: Grade
+    feedback: str
+    context: str  # "postwatch" | "review"
+    duration_ms: int | None
+    at: datetime
+
+
+class CardRepository(Protocol):
+    def get(self, lemma: str) -> Card | None: ...
+
+    def save(self, card: Card) -> None: ...
+
+    def delete(self, lemma: str) -> None: ...
+
+    def due(self, now: datetime, limit: int) -> list[Card]: ...
+
+    def for_video(self, video_id: int) -> list[Card]: ...
+
+    def counts(self, now: datetime) -> tuple[int, int]:
+        """(cards due now, all cards)."""
+        ...
+
+
+class AttemptRepository(Protocol):
+    def add(self, attempt: Attempt) -> None: ...
+
+    def count_since(self, since: datetime) -> int: ...
+
+
+class GlossLookup(Protocol):
+    """Glosses across all videos, for building exercises."""
+
+    def latest_gloss(self, lemma: str) -> Gloss | None: ...
+
+    def meaning_pool(self, exclude: str, limit: int) -> list[str]:
+        """Chinese meanings of other words, for multiple-choice distractors."""
+        ...

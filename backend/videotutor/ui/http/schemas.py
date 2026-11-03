@@ -124,6 +124,9 @@ class VocabularyOut(BaseModel):
 
 class WordStatusIn(BaseModel):
     status: Literal["known", "learning", "ignored"] | None
+    # The video the word was collected from: a new review card links to it.
+    platform: Platform | None = None
+    external_id: str | None = Field(default=None, max_length=32)
 
 
 class GlossOut(BaseModel):
@@ -195,3 +198,55 @@ class LlmTestOut(BaseModel):
     ok: bool
     error: str | None
     config: LlmConfigOut
+
+
+# ---------------------------------------------------------------- review (0.4.0)
+class ReviewSummaryOut(BaseModel):
+    due: int
+    total: int
+    reviewed_today: int
+    waiting_for_gloss: int
+
+
+class NextExerciseIn(BaseModel):
+    context: Literal["postwatch", "review"]
+    platform: Platform | None = None
+    external_id: str | None = Field(default=None, max_length=32)
+    exclude: list[str] = Field(default_factory=list, max_length=500)
+
+
+class ExerciseOut(BaseModel):
+    id: str
+    kind: Literal["recognize", "spell", "recall", "use"]
+    word: str | None
+    sentence: str
+    hint_zh: str | None
+    options: list[str]
+
+
+class NextExerciseOut(BaseModel):
+    exercise: ExerciseOut | None
+
+
+class AnswerIn(BaseModel):
+    exercise_id: str = Field(min_length=1, max_length=64)
+    answer: str = Field(max_length=1000)
+    duration_ms: int | None = Field(default=None, ge=0, le=3_600_000)
+
+
+class AnswerOut(BaseModel):
+    grade: Literal["again", "hard", "good", "easy"]
+    correct_answer: str
+    feedback_zh: str
+    next_due: datetime | None
+    graduated: bool
+
+
+class ComprehensionIn(BaseModel):
+    answer: str = Field(max_length=1000)
+
+
+class ComprehensionOut(BaseModel):
+    grade: Literal["again", "hard", "good", "easy"]
+    feedback_zh: str
+    reference_answer: str

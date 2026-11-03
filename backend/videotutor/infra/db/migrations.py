@@ -114,6 +114,43 @@ MIGRATIONS: tuple[Migration, ...] = (
         );
         """,
     ),
+    Migration(
+        3,
+        "review cards and attempts",
+        """
+        CREATE TABLE cards (
+            lemma            TEXT PRIMARY KEY,
+            source_video_id  INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+            phase            TEXT NOT NULL CHECK (phase IN ('learning', 'review', 'relearning')),
+            due              TEXT NOT NULL,
+            stability        REAL,
+            difficulty       REAL,
+            step             INTEGER,
+            last_review      TEXT,
+            reps             INTEGER NOT NULL DEFAULT 0,
+            lapses           INTEGER NOT NULL DEFAULT 0,
+            created_at       TEXT NOT NULL
+        ) WITHOUT ROWID;
+        CREATE INDEX cards_due ON cards (due);
+        CREATE INDEX cards_video ON cards (source_video_id);
+
+        CREATE TABLE attempts (
+            id           INTEGER PRIMARY KEY,
+            lemma        TEXT,
+            video_id     INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+            kind         TEXT NOT NULL,
+            prompt       TEXT NOT NULL,
+            answer       TEXT NOT NULL,
+            grade        TEXT NOT NULL CHECK (grade IN ('again', 'hard', 'good', 'easy')),
+            feedback     TEXT NOT NULL DEFAULT '',
+            context      TEXT NOT NULL CHECK (context IN ('postwatch', 'review')),
+            duration_ms  INTEGER,
+            at           TEXT NOT NULL
+        );
+        CREATE INDEX attempts_at ON attempts (at);
+        CREATE INDEX attempts_lemma ON attempts (lemma, at);
+        """,
+    ),
 )
 
 

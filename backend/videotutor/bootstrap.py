@@ -14,10 +14,13 @@ import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from videotutor.app.comprehension import ComprehensionService
+from videotutor.app.exercises import ExerciseFactory
 from videotutor.app.lifecycle import AppState, Lifecycle
 from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.ports import Desktop, Locations, SecretStore
 from videotutor.app.prewatch import PrewatchService
+from videotutor.app.review import ReviewService
 from videotutor.app.setup import SetupService
 from videotutor.app.videos import VideoService
 from videotutor.app.vocabulary import VocabularyService
@@ -27,6 +30,8 @@ from videotutor.infra import paths
 from videotutor.infra.captions.youtube import YouTubeCaptionDecoder
 from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
+    SqliteAttemptRepository,
+    SqliteCardRepository,
     SqlitePrewatchRepository,
     SqliteTranscriptRepository,
     SqliteVideoRepository,
@@ -40,6 +45,7 @@ from videotutor.infra.llm.provider import ConfiguredLanguageModelProvider
 from videotutor.infra.secrets import KeyringSecretStore
 from videotutor.infra.settings_store import JsonSettingsStore
 from videotutor.infra.single_instance import RuntimeFile
+from videotutor.infra.srs import FsrsScheduler
 from videotutor.ui.http.api import ApiDeps, create_app
 
 if TYPE_CHECKING:
@@ -83,6 +89,7 @@ class Application:
         self._videos: VideoService | None = None
         self._vocabulary: VocabularyService | None = None
         self._prewatch: PrewatchService | None = None
+        self._review: ReviewService | None = None
         self._runtime = RuntimeFile(locations.runtime_file)
         self._server: HttpServer | None = None
         self._tray: Tray | None = None
@@ -138,14 +145,26 @@ class Application:
             self._vocabulary = VocabularyService(
                 lexicon, self._videos, SqliteWordStatusRepository(db), self.settings
             )
+            prewatch_repo = SqlitePrewatchRepository(db)
             self._prewatch = PrewatchService(
                 self._videos,
                 self._vocabulary,
-                SqlitePrewatchRepository(db),
+                prewatch_repo,
                 models,
                 self.tasks,
                 self.settings,
             )
+            attempts = SqliteAttemptRepository(db)
+            self._review = ReviewService(
+                cards=SqliteCardRepository(db),
+                attempts=attempts,
+                srs=FsrsScheduler(),
+                exercises=ExerciseFactory(prewatch_repo, lexicon, models),
+                videos=self._videos,
+                vocabulary=self._vocabulary,
+                prefetch_gloss=self._prewatch.prefetch_gloss,
+            )
+            comprehension = ComprehensionService(self._videos, prewatch_repo, attempts, models)
             llm_settings = LlmSettingsService(self.settings, self.secrets, models)
 
             sock = bind_first_free(self.product.ports)
@@ -157,6 +176,8 @@ class Application:
                     videos=self._videos,
                     vocabulary=self._vocabulary,
                     prewatch=self._prewatch,
+                    review=self._review,
+                    comprehension=comprehension,
                     settings=self.settings,
                     llm_settings=llm_settings,
                     tasks=self.tasks,

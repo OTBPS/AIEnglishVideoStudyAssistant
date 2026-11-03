@@ -10,8 +10,9 @@ import json
 import sqlite3
 from datetime import datetime
 
-from videotutor.app.ports import RecentVideo, TranscriptInfo
+from videotutor.app.ports import Attempt, RecentVideo, TranscriptInfo
 from videotutor.domain.prewatch import Gloss, PrewatchGuide, Question
+from videotutor.domain.review import Card, SrsPhase, SrsState
 from videotutor.domain.transcript import Segment, Transcript
 from videotutor.domain.video import Platform, TrackKind, Video, VideoRef
 from videotutor.domain.vocab import WordStatus
@@ -292,6 +293,26 @@ class SqlitePrewatchRepository:
                 ],
             )
 
+    def latest_gloss(self, lemma: str) -> Gloss | None:
+        with self._db.read() as c:
+            r = c.execute(
+                "SELECT * FROM glosses WHERE lemma = ? ORDER BY created_at DESC LIMIT 1", (lemma,)
+            ).fetchone()
+        if r is None:
+            return None
+        return Gloss(
+            r["lemma"], r["part_of_speech"], r["definition_en"], r["definition_zh"], r["example"]
+        )
+
+    def meaning_pool(self, exclude: str, limit: int) -> list[str]:
+        with self._db.read() as c:
+            rows = c.execute(
+                "SELECT DISTINCT definition_zh FROM glosses WHERE lemma != ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (exclude, limit),
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def guide(self, video_id: int) -> PrewatchGuide | None:
         with self._db.read() as c:
             r = c.execute(
@@ -321,4 +342,110 @@ class SqlitePrewatchRepository:
                     model,
                     _ts(now),
                 ),
+            )
+
+
+def _card(r: sqlite3.Row) -> Card:
+    return Card(
+        lemma=r["lemma"],
+        srs=SrsState(
+            phase=SrsPhase(r["phase"]),
+            due=datetime.fromisoformat(r["due"]),
+            stability=r["stability"],
+            difficulty=r["difficulty"],
+            step=r["step"],
+            last_review=_dt(r["last_review"]),
+        ),
+        source_video_id=r["source_video_id"],
+        reps=r["reps"],
+        lapses=r["lapses"],
+        created_at=datetime.fromisoformat(r["created_at"]),
+    )
+
+
+class SqliteCardRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def get(self, lemma: str) -> Card | None:
+        with self._db.read() as c:
+            r = c.execute("SELECT * FROM cards WHERE lemma = ?", (lemma,)).fetchone()
+        return _card(r) if r else None
+
+    def save(self, card: Card) -> None:
+        s = card.srs
+        with self._db.write() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO cards (lemma, source_video_id, phase, due, stability, "
+                "difficulty, step, last_review, reps, lapses, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    card.lemma,
+                    card.source_video_id,
+                    s.phase.value,
+                    _ts(s.due),
+                    s.stability,
+                    s.difficulty,
+                    s.step,
+                    _ts(s.last_review) if s.last_review else None,
+                    card.reps,
+                    card.lapses,
+                    _ts(card.created_at),
+                ),
+            )
+
+    def delete(self, lemma: str) -> None:
+        with self._db.write() as c:
+            c.execute("DELETE FROM cards WHERE lemma = ?", (lemma,))
+
+    def due(self, now: datetime, limit: int) -> list[Card]:
+        with self._db.read() as c:
+            rows = c.execute(
+                "SELECT * FROM cards WHERE due <= ? ORDER BY due LIMIT ?", (_ts(now), limit)
+            ).fetchall()
+        return [_card(r) for r in rows]
+
+    def for_video(self, video_id: int) -> list[Card]:
+        with self._db.read() as c:
+            rows = c.execute(
+                "SELECT * FROM cards WHERE source_video_id = ? ORDER BY created_at", (video_id,)
+            ).fetchall()
+        return [_card(r) for r in rows]
+
+    def counts(self, now: datetime) -> tuple[int, int]:
+        with self._db.read() as c:
+            due = c.execute("SELECT COUNT(*) FROM cards WHERE due <= ?", (_ts(now),)).fetchone()[0]
+            total = c.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+        return int(due), int(total)
+
+
+class SqliteAttemptRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def add(self, a: Attempt) -> None:
+        with self._db.write() as c:
+            c.execute(
+                "INSERT INTO attempts (lemma, video_id, kind, prompt, answer, grade, feedback, "
+                "context, duration_ms, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    a.lemma,
+                    a.video_id,
+                    a.kind,
+                    a.prompt,
+                    a.answer,
+                    a.grade.value,
+                    a.feedback,
+                    a.context,
+                    a.duration_ms,
+                    _ts(a.at),
+                ),
+            )
+
+    def count_since(self, since: datetime) -> int:
+        with self._db.read() as c:
+            return int(
+                c.execute("SELECT COUNT(*) FROM attempts WHERE at >= ?", (_ts(since),)).fetchone()[
+                    0
+                ]
             )

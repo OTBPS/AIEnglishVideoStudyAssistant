@@ -196,6 +196,15 @@ class PrewatchService:
             self._jobs[_key(ref)] = handle
         return self.state(ref)
 
+    def prefetch_gloss(self, ref: VideoRef, lemma: str) -> None:
+        """Make sure a collected word has a meaning for its exercises: fetch one
+        in the background if no video has glossed it yet and an AI is set up."""
+        if self._repo.latest_gloss(lemma) is not None or self._llm.current() is None:
+            return
+        self._tasks.run_blocking(
+            f"gloss:{lemma}", lambda: self.gloss_word(ref, lemma), timeout=GENERATE_TIMEOUT_S
+        )
+
     def gloss_word(self, ref: VideoRef, lemma: str) -> Gloss:
         """Gloss one word the learner clicked (blocking; run it through the task supervisor)."""
         video = self._videos.require_video(ref)
