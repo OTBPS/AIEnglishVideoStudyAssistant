@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from videotutor.app.comprehension import ComprehensionService
 from videotutor.app.exercises import ExerciseFactory
+from videotutor.app.listening import ListeningService
 from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.ports import Locations
 from videotutor.app.prewatch import PrewatchService
@@ -19,6 +20,7 @@ from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
     SqliteAttemptRepository,
     SqliteCardRepository,
+    SqliteListeningIssueRepository,
     SqlitePrewatchRepository,
     SqliteWordStatusRepository,
 )
@@ -93,6 +95,7 @@ def build_deps(
         prewatch=prewatch,
         review=review,
         comprehension=ComprehensionService(videos, prewatch_repo, attempts, models),
+        listening=ListeningService(videos, SqliteListeningIssueRepository(database)),
         settings=store,
         llm_settings=LlmSettingsService(store, InMemorySecretStore(), models),
         tasks=tasks,
@@ -390,3 +393,25 @@ def test_review_endpoints(client: TestClient, models: FixedModelProvider) -> Non
 
     missing = client.post(f"/api/videos/youtube/{VIDEO}/comprehension/0", json={"answer": "x"})
     assert missing.status_code == 404  # no questions were generated for this video
+
+
+# ---------------------------------------------------------------- listening
+def test_missed_line_replays_and_counts(client: TestClient) -> None:
+    _with_transcript(client)  # lines at 0-3000 and 3000-6000
+    url = f"/api/videos/youtube/{VIDEO}/missed"
+    first = client.post(url, json={"position_ms": 4200}).json()
+    assert first == {
+        "start_ms": 3000,
+        "end_ms": 6000,
+        "text": "As Robinson said, children take a chance.",
+        "count": 1,
+        "replay_from_ms": 2700,
+    }
+    assert client.post(url, json={"position_ms": 5900}).json()["count"] == 2
+    assert (
+        client.post(url, json={"position_ms": 6800}).json()["start_ms"] == 3000
+    )  # just after the end
+    assert (
+        client.post(url, json={"position_ms": 60000}).status_code == 404
+    )  # nothing was said there
+    assert [i["count"] for i in client.get(url).json()] == [3]

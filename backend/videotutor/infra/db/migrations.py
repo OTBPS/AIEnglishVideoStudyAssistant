@@ -151,6 +151,22 @@ MIGRATIONS: tuple[Migration, ...] = (
         CREATE INDEX attempts_lemma ON attempts (lemma, at);
         """,
     ),
+    Migration(
+        4,
+        "listening issues",
+        """
+        CREATE TABLE listening_issues (
+            video_id  INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+            start_ms  INTEGER NOT NULL,
+            end_ms    INTEGER NOT NULL,
+            text      TEXT NOT NULL,
+            count     INTEGER NOT NULL DEFAULT 1,
+            first_at  TEXT NOT NULL,
+            last_at   TEXT NOT NULL,
+            PRIMARY KEY (video_id, start_ms)
+        ) WITHOUT ROWID;
+        """,
+    ),
 )
 
 

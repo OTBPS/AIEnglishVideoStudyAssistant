@@ -156,3 +156,11 @@ def test_close_is_final_and_idempotent() -> None:
 def test_negative_position_is_invalid() -> None:
     with pytest.raises(ValueError, match="negative"):
         ev("play", -1)
+
+
+def test_bilibili_parts_have_their_own_ids() -> None:
+    VideoRef(Platform.BILIBILI, "BV1xx411c7mD-p2")
+    VideoRef(Platform.BILIBILI, "BV1xx411c7mD-p120")
+    for bad in ("BV1xx411c7mD-p1", "BV1xx411c7mD-p0", "BV1xx411c7mD-p1000"):
+        with pytest.raises(ValueError, match="not a bilibili video id"):
+            VideoRef(Platform.BILIBILI, bad)

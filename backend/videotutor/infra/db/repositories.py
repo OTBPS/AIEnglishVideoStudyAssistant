@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime
 
 from videotutor.app.ports import Attempt, RecentVideo, TranscriptInfo
+from videotutor.domain.listening import ListeningIssue
 from videotutor.domain.prewatch import Gloss, PrewatchGuide, Question
 from videotutor.domain.review import Card, SrsPhase, SrsState
 from videotutor.domain.transcript import Segment, Transcript
@@ -449,3 +450,44 @@ class SqliteAttemptRepository:
                     0
                 ]
             )
+
+
+def _issue(r: sqlite3.Row) -> ListeningIssue:
+    return ListeningIssue(
+        r["video_id"],
+        r["start_ms"],
+        r["end_ms"],
+        r["text"],
+        r["count"],
+        datetime.fromisoformat(r["first_at"]),
+        datetime.fromisoformat(r["last_at"]),
+    )
+
+
+class SqliteListeningIssueRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def record(
+        self, video_id: int, start_ms: int, end_ms: int, text: str, now: datetime
+    ) -> ListeningIssue:
+        with self._db.write() as c:
+            c.execute(
+                "INSERT INTO listening_issues "
+                "(video_id, start_ms, end_ms, text, first_at, last_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (video_id, start_ms) DO UPDATE SET "
+                "count = count + 1, last_at = excluded.last_at",
+                (video_id, start_ms, end_ms, text, _ts(now), _ts(now)),
+            )
+            row = c.execute(
+                "SELECT * FROM listening_issues WHERE video_id = ? AND start_ms = ?",
+                (video_id, start_ms),
+            ).fetchone()
+        return _issue(row)
+
+    def for_video(self, video_id: int) -> list[ListeningIssue]:
+        with self._db.read() as c:
+            rows = c.execute(
+                "SELECT * FROM listening_issues WHERE video_id = ? ORDER BY start_ms", (video_id,)
+            ).fetchall()
+        return [_issue(r) for r in rows]

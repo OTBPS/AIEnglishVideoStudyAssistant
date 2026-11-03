@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from videotutor.domain.listening import ListeningIssue
 from videotutor.domain.prewatch import Gloss, PrewatchGuide
 from videotutor.domain.review import Card, Grade, SrsState
 from videotutor.domain.transcript import RawCue, Transcript
@@ -223,3 +224,14 @@ class GlossLookup(Protocol):
     def meaning_pool(self, exclude: str, limit: int) -> list[str]:
         """Chinese meanings of other words, for multiple-choice distractors."""
         ...
+
+
+# ---------------------------------------------------------------- listening (M4)
+class ListeningIssueRepository(Protocol):
+    def record(
+        self, video_id: int, start_ms: int, end_ms: int, text: str, now: datetime
+    ) -> ListeningIssue:
+        """Insert the line, or count one more replay of it."""
+        ...
+
+    def for_video(self, video_id: int) -> list[ListeningIssue]: ...

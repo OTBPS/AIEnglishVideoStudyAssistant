@@ -50,6 +50,8 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | `app/exercises.py` | 由卡片出题（取释义、干扰项、挖空）与判分 | — |
 | `app/grading.py` / `app/comprehension.py` | AI 判分（统一三档）；课后理解题批改 | — |
 | `infra/srs.py` | FSRS（py-fsrs）实现 `SpacedRepetition` 端口 | — |
+| `domain/listening.py` / `app/listening.py` | 「没听清」：按播放位置定位当前句（停顿中则取刚结束的一句），记录次数，返回提前 0.3 秒的重放位置 | — |
+| `infra/captions/registry.py` | 所有字幕格式（json3 / srv3 / B 站 bcc）的统一解码入口 | — |
 | `infra/lexicon.py` | 读取内置英文词表（`tools/build_lexicon.py` 生成） | — |
 | `infra/llm/` | `ClaudeLanguageModel`（官方 SDK、结构化输出、拒答回退）、`OpenAICompatibleLanguageModel`、按配置构建的 provider | 提示词和业务校验 |
 | `infra/secrets.py` | API 密钥存 Windows 凭据管理器 | 写文件或日志 |
@@ -65,7 +67,8 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | `ui/http/security.py` | Host/Origin 校验（防 CSRF 和 DNS 重绑定） | — |
 | `ui/tray.py` | 托盘菜单，每个菜单项调用 bootstrap 注入的动作 | — |
 | `extension/src/youtube/page.js` | 运行在页面主环境：读取播放器的视频信息，转发播放器自己的字幕响应（需要只有播放器才能生成的 pot 令牌，扩展无法自行请求） | 解析字幕 |
-| `extension/src/youtube/content.js` | 每个标签页的观看状态、播放事件、与侧边栏的长连接 | 访问桌面程序（交给 service worker） |
+| `extension/src/content.js` | 每个标签页的观看状态、播放事件、「没听清」（Alt+R）重放、与侧边栏的长连接；平台差异集中在 `PLATFORMS` 表 | 访问桌面程序（交给 service worker） |
+| `extension/src/bilibili/page.js` | B 站页面主环境：用学习者自己的登录状态取视频信息和 CC/AI 字幕（B 站要求登录），支持多 P（`BV…-p2`） | 解析字幕 |
 | `extension/src/background.js` | 唯一调用桌面程序 API 的地方；关闭标签页时结束会话；升级后自动重新加载扩展 | — |
 | `extension/src/sidepanel.js` | 跟随当前标签页显示字幕，高亮当前句，点击跳转 | 存学习数据 |
 

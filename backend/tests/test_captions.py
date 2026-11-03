@@ -111,3 +111,55 @@ def test_bad_payloads_are_rejected(fmt: str, body: str, message: str) -> None:
 
 def test_formats() -> None:
     assert decoder.formats() == {"json3", "srv3"}
+
+
+# ---------------------------------------------------------------- Bilibili
+BCC = json.dumps(
+    {
+        "font_size": 0.4,
+        "font_color": "#FFFFFF",
+        "background_alpha": 0.5,
+        "background_color": "#9C27B0",
+        "Stroke": "none",
+        "type": "AIsubtitle",
+        "lang": "en",
+        "version": "v1.6.0.4",
+        "body": [
+            {
+                "from": 0.42,
+                "to": 2.5,
+                "sid": 1,
+                "location": 2,
+                "content": "Hello everyone,",
+                "music": 0.0,
+            },
+            {"from": 2.5, "to": 4.25, "sid": 2, "location": 2, "content": "  ", "music": 0.0},
+            {"from": "x", "to": 5, "content": "bad timing"},
+            {
+                "from": 4.25,
+                "to": 6.0,
+                "sid": 3,
+                "location": 2,
+                "content": "welcome back.",
+                "music": 0.0,
+            },
+        ],
+    }
+)
+
+
+def test_bilibili_bcc() -> None:
+    from videotutor.infra.captions.registry import CaptionDecoders
+
+    decoders = CaptionDecoders()
+    assert decoders.formats() == {"json3", "srv3", "bcc"}
+    cues = decoders.decode("bcc", BCC)
+    assert cues == [RawCue(420, 2080, "Hello everyone,"), RawCue(4250, 1750, "welcome back.")]
+    with pytest.raises(CaptionFormatError, match="no body"):
+        decoders.decode("bcc", "{}")
+    with pytest.raises(CaptionFormatError, match="not JSON"):
+        decoders.decode("bcc", "nope")
+    with pytest.raises(CaptionFormatError, match="unsupported"):
+        decoders.decode("vtt", "WEBVTT")
+    with pytest.raises(CaptionFormatError, match="too large"):
+        decoders.decode("bcc", " " * (MAX_BODY_CHARS + 1))

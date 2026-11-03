@@ -7,6 +7,8 @@ import { openWordPopover, renderTranscript, wordClass } from "./panel/transcript
 import { findSegmentIndex } from "./lib/timeline.js";
 
 const MANUAL_SCROLL_PAUSE_MS = 4000;
+// Bilibili may prefix a locale: /zh-Hans/video/BV...
+const VIDEO_PAGE = /^https:\/\/www\.(youtube\.com\/|bilibili\.com\/([^/]+\/)?video\/)/;
 const PREWATCH_POLL_MS = 2500;
 
 const $ = (id) => document.getElementById(id);
@@ -21,6 +23,8 @@ const el = {
   retry: $("retry"),
   list: $("transcript"),
   pop: $("popover"),
+  missedBtn: $("missed-btn"),
+  missedCount: $("missed-count"),
 };
 
 let port = null;
@@ -84,7 +88,7 @@ function showIdle(text) {
 }
 
 async function onState(state) {
-  if (!state) return showIdle("打开一个 YouTube 英文视频，字幕会显示在这里。");
+  if (!state) return showIdle("打开一个 YouTube 或 Bilibili 的英文视频，字幕会显示在这里。");
   el.hint.textContent = "";
   el.video.hidden = false;
   el.title.textContent = state.title || state.externalId;
@@ -116,7 +120,27 @@ async function loadVideo() {
   renderTranscript(el.list, segments, vocab);
   renderSummary(el.summary, vocab);
   el.list.hidden = false;
-  await loadPrewatch();
+  await Promise.all([loadPrewatch(), loadMissed()]);
+}
+
+// ------------------------------------------------------------ "没听清" lines
+async function loadMissed() {
+  const r = await api(`${videoPath()}/missed`);
+  if (r.ok) for (const issue of r.data) markMissed(issue);
+  updateMissedCount();
+}
+
+function markMissed(issue) {
+  const i = segments.findIndex((s) => s.start_ms === issue.start_ms);
+  const li = el.list.children[i];
+  if (!li) return;
+  li.classList.add("missed");
+  li.title = `没听清 ${issue.count} 次`;
+}
+
+function updateMissedCount() {
+  const n = el.list.querySelectorAll("li.missed").length;
+  el.missedCount.textContent = n ? `没听清 ${n} 句（课后可以精听）` : "";
 }
 
 async function refreshVocabulary() {
@@ -192,8 +216,8 @@ async function bindActiveTab() {
   port?.disconnect();
   port = null;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !/^https:\/\/www\.youtube\.com\//.test(tab.url || "")) {
-    return showIdle("打开一个 YouTube 英文视频，字幕会显示在这里。");
+  if (!tab?.id || !VIDEO_PAGE.test(tab.url || "")) {
+    return showIdle("打开一个 YouTube 或 Bilibili 的英文视频，字幕会显示在这里。");
   }
   try {
     port = chrome.tabs.connect(tab.id, { name: "sidepanel" });
@@ -204,6 +228,10 @@ async function bindActiveTab() {
     if (m.type === "state") onState(m.state);
     else if (m.type === "time") onTime(m.ms);
     else if (m.type === "prewatch-started") loadPrewatch();
+    else if (m.type === "missed") {
+      markMissed(m.issue);
+      updateMissedCount();
+    }
   });
   port.onDisconnect.addListener(() => {
     if (chrome.runtime.lastError) showIdle("请刷新视频页面，让 VideoTutor 开始工作。");
@@ -239,6 +267,7 @@ document.addEventListener("keydown", (ev) => {
 for (const evName of ["wheel", "touchmove", "keydown"]) {
   window.addEventListener(evName, () => (userScrolledAt = Date.now()), { passive: true });
 }
+el.missedBtn.addEventListener("click", () => port?.postMessage({ type: "missed" }));
 el.retry.addEventListener("click", async () => {
   if ((await refreshAppStatus()) === "connected") bindActiveTab();
 });

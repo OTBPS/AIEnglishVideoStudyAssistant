@@ -100,3 +100,7 @@ button.small:hover { border-color: var(--accent); color: var(--accent); }
 [hidden] { display: none !important; }
 
 .pw-after { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); display: flex; gap: 8px; align-items: center; }
+
+.listen-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+kbd { font: 11px ui-monospace, Consolas, monospace; padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; }
+#transcript li.missed { box-shadow: inset 3px 0 0 #d97706; }

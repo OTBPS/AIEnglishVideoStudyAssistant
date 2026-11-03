@@ -87,6 +87,12 @@ const handlers = {
       body: { auto: true },
     }),
 
+  missed: (msg) =>
+    api(`/api/videos/${enc(msg.platform)}/${enc(msg.externalId)}/missed`, {
+      method: "POST",
+      body: { position_ms: Math.round(msg.positionMs) },
+    }),
+
   "watch-event": (msg) =>
     api(`/api/sessions/${Number(msg.sessionId)}/events`, { method: "POST", body: { events: [msg.event] } }),
 

@@ -14,7 +14,9 @@ class Platform(StrEnum):
 
 _ID_PATTERNS = {
     Platform.YOUTUBE: re.compile(r"^[A-Za-z0-9_-]{11}$"),
-    Platform.BILIBILI: re.compile(r"^BV[0-9A-Za-z]{10}$"),
+    # Multi-part videos: each part has its own transcript. Part 1 is the bare
+    # BV id (unchanged from 0.2), later parts are "BV...-p2" and so on.
+    Platform.BILIBILI: re.compile(r"^BV[0-9A-Za-z]{10}(-p[2-9]|-p[1-9][0-9]{1,2})?$"),
 }
 
 

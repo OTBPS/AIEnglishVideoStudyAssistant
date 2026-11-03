@@ -25,6 +25,7 @@ from videotutor.app.errors import (
     NotFoundError,
     StorageReadOnlyError,
 )
+from videotutor.app.listening import ListeningService
 from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.prewatch import PrewatchService
 from videotutor.app.review import ReviewService
@@ -35,7 +36,7 @@ from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor, TaskTimeout
 
-from .routes import learning, review, settings, system, videos
+from .routes import learning, listening, review, settings, system, videos
 from .security import local_only_guard
 
 
@@ -48,6 +49,7 @@ class ApiDeps:
     prewatch: PrewatchService
     review: ReviewService
     comprehension: ComprehensionService
+    listening: ListeningService
     settings: SettingsStore
     llm_settings: LlmSettingsService
     tasks: TaskSupervisor
@@ -102,6 +104,7 @@ def create_app(deps: ApiDeps, port: int) -> FastAPI:
     app.include_router(videos.router(deps.videos))
     app.include_router(learning.router(deps.vocabulary, deps.prewatch, deps.review, deps.tasks))
     app.include_router(review.router(deps.review, deps.comprehension, deps.tasks))
+    app.include_router(listening.router(deps.listening))
     app.include_router(settings.router(deps.settings, deps.llm_settings, deps.tasks))
 
     @app.get("/", include_in_schema=False)

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from videotutor.app.comprehension import ComprehensionService
 from videotutor.app.exercises import ExerciseFactory
 from videotutor.app.lifecycle import AppState, Lifecycle
+from videotutor.app.listening import ListeningService
 from videotutor.app.llm_settings import LlmSettingsService
 from videotutor.app.ports import Desktop, Locations, SecretStore
 from videotutor.app.prewatch import PrewatchService
@@ -27,11 +28,12 @@ from videotutor.app.vocabulary import VocabularyService
 from videotutor.core.product import Product
 from videotutor.core.tasks import TaskSupervisor
 from videotutor.infra import paths
-from videotutor.infra.captions.youtube import YouTubeCaptionDecoder
+from videotutor.infra.captions.registry import CaptionDecoders
 from videotutor.infra.db.database import Database
 from videotutor.infra.db.repositories import (
     SqliteAttemptRepository,
     SqliteCardRepository,
+    SqliteListeningIssueRepository,
     SqlitePrewatchRepository,
     SqliteTranscriptRepository,
     SqliteVideoRepository,
@@ -135,7 +137,7 @@ class Application:
                 SqliteVideoRepository(db),
                 SqliteTranscriptRepository(db),
                 SqliteWatchRepository(db),
-                YouTubeCaptionDecoder(),
+                CaptionDecoders(),
             )
             if not db.read_only:
                 closed = self._videos.close_unfinished_sessions()
@@ -184,6 +186,7 @@ class Application:
                     prewatch=self._prewatch,
                     review=self._review,
                     comprehension=comprehension,
+                    listening=ListeningService(self._videos, SqliteListeningIssueRepository(db)),
                     settings=self.settings,
                     llm_settings=llm_settings,
                     tasks=self.tasks,

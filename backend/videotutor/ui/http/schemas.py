@@ -251,3 +251,16 @@ class ComprehensionOut(BaseModel):
     grade: Literal["again", "hard", "good", "easy"]
     feedback_zh: str
     reference_answer: str
+
+
+# ---------------------------------------------------------------- listening (0.5.0)
+class MissedIn(BaseModel):
+    position_ms: int = Field(ge=0, le=48 * 3600 * 1000)
+
+
+class ListeningIssueOut(BaseModel):
+    start_ms: int
+    end_ms: int
+    text: str
+    count: int
+    replay_from_ms: int
