@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "VideoTutor",
   "description": "看英文视频学英语：课前预习、课中跟练、课后测验。需要配合 VideoTutor 桌面程序使用。",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "minimum_chrome_version": "116",
   "permissions": [
     "sidePanel",
