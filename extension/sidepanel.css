@@ -1,0 +1,58 @@
+:root {
+  --text: #1f2937;
+  --muted: #6b7280;
+  --bg: #ffffff;
+  --line-hover: #f3f4f6;
+  --current-bg: #dbeafe;
+  --current-text: #1e3a8a;
+  --accent: #2563eb;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
+  --border: #e5e7eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #f3f4f6;
+    --muted: #9ca3af;
+    --bg: #111827;
+    --line-hover: #1f2937;
+    --current-bg: #1e3a8a;
+    --current-text: #dbeafe;
+    --accent: #60a5fa;
+    --border: #374151;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+header {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 600; }
+.muted { color: var(--muted); font-size: 12px; }
+.ok { color: var(--ok); }
+.warn { color: var(--warn); }
+.err { color: var(--err); }
+#video { padding: 10px 14px 0; }
+#video h1 { margin: 0; font-size: 15px; font-weight: 600; }
+#video p { margin: 2px 0 0; }
+.hint { padding: 0 14px; color: var(--muted); }
+#retry { margin: 0 14px; }
+#transcript { list-style: none; margin: 8px 0 24px; padding: 0 6px; }
+#transcript li {
+  display: flex; gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+}
+#transcript li:hover { background: var(--line-hover); }
+#transcript li.current { background: var(--current-bg); color: var(--current-text); }
+#transcript time {
+  flex: none; width: 3.6em; text-align: right; color: var(--muted);
+  font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 1px;
+}
+#transcript li.current time { color: inherit; }

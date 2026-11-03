@@ -100,7 +100,7 @@ def build_exe(name: str) -> Path:
     shutil.copytree(
         ROOT / "extension",
         app_dir / "extension",
-        ignore=shutil.ignore_patterns("node_modules", "dist", "*.md"),
+        ignore=shutil.ignore_patterns("node_modules", "dist", "tests", "*.md"),
     )
     return app_dir
 

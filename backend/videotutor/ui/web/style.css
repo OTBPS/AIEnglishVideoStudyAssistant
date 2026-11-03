@@ -54,3 +54,9 @@ button {
 }
 button:hover { filter: brightness(1.1); }
 footer { margin-top: 32px; color: var(--muted); font-size: 12px; text-align: center; }
+.recent { list-style: none; margin: 8px 0 0; padding: 0; }
+.recent li { display: flex; flex-direction: column; padding: 8px 0; border-top: 1px solid var(--border); }
+.recent li:first-child { border-top: none; }
+.recent a { color: var(--accent); text-decoration: none; }
+.recent a:hover { text-decoration: underline; }
+.recent .meta { color: var(--muted); font-size: 12px; }

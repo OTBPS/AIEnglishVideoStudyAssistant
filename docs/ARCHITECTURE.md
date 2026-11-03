@@ -11,7 +11,9 @@ ui/                 交付层：HTTP 路由、托盘、静态网页         → 
    │
 infra/              适配器：文件、配置存储、日志、互斥体、     → 实现 app 定义的端口
    │                OS 外壳、uvicorn
-app/                用例、流程状态模型、端口（Protocol）       → 调用 core（M1 起还有 domain）
+app/                用例、流程状态模型、端口（Protocol）       → 调用 domain、core
+   │
+domain/             纯业务模型：视频、字幕、观看会话           → 只调用 core；禁止框架和 I/O 库
    │
 core/               只依赖标准库：产品信息、状态机、任务管理器
 ```
@@ -20,9 +22,8 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 
 - 上层可以依赖下层，反之不行；
 - `ui` 不能直接导入 `infra`，所有外部能力都通过 `app/ports.py` 的接口注入；
-- `core` 不能导入任何第三方包。
-
-M1 引入 `domain/`（视频、字幕、卡片、学习会话），位置在 `app` 和 `core` 之间，只能依赖 `core`。
+- `core` 不能导入任何第三方包；
+- `domain` 不能导入 fastapi、pydantic、sqlite3、urllib 等框架和 I/O 库。
 
 ## 模块职责
 
@@ -34,15 +35,26 @@ M1 引入 `domain/`（视频、字幕、卡片、学习会话），位置在 `ap
 | `app/lifecycle.py` | 应用状态 CREATED→STARTING→RUNNING→STOPPING→STOPPED（以及 FAILED）；停止钩子逆序执行 | — |
 | `app/settings.py` | 配置模型（严格校验 + 默认值）、`SCHEMA_VERSION`、迁移表 | 不碰文件 |
 | `app/setup.py` | 首次运行向导和托盘需要的用例 | — |
-| `app/ports.py` | `Locations`、`Desktop` 等接口 | 不放实现 |
+| `app/ports.py` | `Locations`、`Desktop`、各仓储与 `CaptionDecoder` 接口 | 不放实现 |
+| `app/videos.py` | 观看用例：打开视频并决定要采集哪条字幕、保存字幕、记录观看事件、关闭会话、最近观看 | 不知道字幕格式和数据库 |
+| `domain/video.py` | `VideoRef`（按平台校验 ID）、`CaptionTrack`、选轨规则（人工 > 自动，en > en-XX） | — |
+| `domain/transcript.py` | `Transcript`/`Segment` 不变式；`normalize` 清洗、合并滚动重复、消除重叠 | — |
+| `domain/watch.py` | `WatchSession` 状态机；只计入真实前进播放的时长，乱序或重复事件忽略 | — |
+| `infra/db/` | SQLite：打开时新建、损坏隔离、备份后迁移、新版本只读；单连接加锁；仓储实现 | 业务规则 |
+| `infra/captions/youtube.py` | YouTube json3 / srv3 解码 | 选轨、清洗（属于 domain） |
 | `infra/settings_store.py` | 配置的读写：迁移、损坏隔离、单字段回退、新版本文件只读、原子写 | — |
 | `infra/paths.py` | 源码运行与安装后两种情况下的目录布局 | 不写死盘符 |
 | `infra/http_server.py` | 预绑定端口的 uvicorn 线程 | 不含路由 |
 | `infra/single_instance.py` | 命名互斥体 + `runtime.json` | — |
-| `ui/http/api.py` | 路由：解析请求 → 调用 app 服务 → 组织响应 | 不含业务逻辑 |
+| `ui/http/api.py` | 组装应用：安全中间件、路由、错误映射（404/409/422）、静态页面 | 不含业务逻辑 |
+| `ui/http/routes/*.py` | 各区域的薄路由：解析请求 → 调用 app 服务 → 组织响应 | 不含业务逻辑 |
+| `ui/http/schemas.py` | 线上格式（pydantic）与大小上限，和 domain 数据类分开 | — |
 | `ui/http/security.py` | Host/Origin 校验（防 CSRF 和 DNS 重绑定） | — |
 | `ui/tray.py` | 托盘菜单，每个菜单项调用 bootstrap 注入的动作 | — |
-| `extension/` | 识别视频页、侧边栏 UI；所有数据和逻辑都在桌面程序 | 不存学习数据 |
+| `extension/src/youtube/page.js` | 运行在页面主环境：读取播放器的视频信息，转发播放器自己的字幕响应（需要只有播放器才能生成的 pot 令牌，扩展无法自行请求） | 解析字幕 |
+| `extension/src/youtube/content.js` | 每个标签页的观看状态、播放事件、与侧边栏的长连接 | 访问桌面程序（交给 service worker） |
+| `extension/src/background.js` | 唯一调用桌面程序 API 的地方；关闭标签页时结束会话；升级后自动重新加载扩展 | — |
+| `extension/src/sidepanel.js` | 跟随当前标签页显示字幕，高亮当前句，点击跳转 | 存学习数据 |
 
 ## 关键机制
 

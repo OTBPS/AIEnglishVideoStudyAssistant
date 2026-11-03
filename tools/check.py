@@ -43,8 +43,12 @@ def gates(fix: bool) -> list[tuple[str, list[str], Path]]:
     ]
     node = shutil.which("node")
     if node:
-        for js in sorted((ROOT / "extension" / "src").glob("*.js")):
-            out.append((f"node --check {js.name}", [node, "--check", str(js)], ROOT))
+        ext = ROOT / "extension"
+        web = BACKEND / "videotutor" / "ui" / "web"
+        for js in [*sorted((ext / "src").rglob("*.js")), *sorted(web.glob("*.js"))]:
+            rel = js.relative_to(ROOT).as_posix()
+            out.append((f"node --check {rel}", [node, "--check", str(js)], ROOT))
+        out.append(("extension unit tests", [node, "--test", "extension/tests/*.test.js"], ROOT))
     else:
         print("note: node not found, extension JavaScript not syntax-checked")
     return out
