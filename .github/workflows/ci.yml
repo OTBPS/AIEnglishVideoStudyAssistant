@@ -1,0 +1,109 @@
+# Same scripts as a developer runs locally -- CI adds no logic of its own.
+#   push / PR : quality gates -> build -> smoke test -> installer verification
+#   tag vX.Y.Z: the above + delta from the previous release + publish
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Tag must match product.toml
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          v=$(python -c "import tomllib;print(tomllib.load(open('product.toml','rb'))['product']['version'])")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match product.toml version $v"; exit 1
+          fi
+
+      - name: Environment (locked)
+        working-directory: backend
+        run: |
+          python -m pip install uv==0.13.6
+          python -m uv sync --frozen
+
+      - name: Quality gates
+        run: backend/.venv/Scripts/python tools/check.py
+
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Previous release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/previous
+          prev=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName' || true)
+          if [ -n "$prev" ]; then
+            gh release download "$prev" --dir build/previous \
+              --pattern '*-files.json' --pattern '*-Setup-*.exe'
+          fi
+
+      - name: Build
+        shell: bash
+        run: |
+          args="--skip-checks"
+          f=$(ls build/previous/*-files.json 2>/dev/null | head -1 || true)
+          if [ -n "$f" ]; then args="$args --previous-files $f"; fi
+          backend/.venv/Scripts/python tools/build.py $args
+
+      - name: Verify installer
+        shell: bash
+        run: |
+          args=""
+          s=$(ls build/previous/*-Setup-*.exe 2>/dev/null | head -1 || true)
+          if [ -n "$s" ]; then args="--previous-setup $s"; fi
+          backend/.venv/Scripts/python tools/verify_install.py $args
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/release/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "VideoTutor $GITHUB_REF_NAME" --generate-notes --verify-tag
