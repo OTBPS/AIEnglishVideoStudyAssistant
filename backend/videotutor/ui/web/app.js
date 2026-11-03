@@ -43,6 +43,7 @@ function renderLlm(config) {
   $("llm-model").value = config.model;
   $("llm-base-url").value = config.base_url;
   $("base-url-field").hidden = config.provider !== "openai_compatible";
+  $("base-url-note").hidden = config.provider !== "openai_compatible";
   $("model-note").hidden = config.provider !== "claude";
   $("llm-key").placeholder = config.has_key ? "已保存（留空则不修改）" : "粘贴密钥";
   $("llm-remove").hidden = !config.has_key;
@@ -54,6 +55,7 @@ async function setupLlm() {
     radio.onchange = () => {
       const p = provider();
       $("base-url-field").hidden = p !== "openai_compatible";
+      $("base-url-note").hidden = p !== "openai_compatible";
       $("model-note").hidden = p !== "claude";
       $("llm-model").value = DEFAULT_MODELS[p];
     };

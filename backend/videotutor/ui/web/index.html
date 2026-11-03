@@ -45,8 +45,9 @@
       </div>
       <label class="field" id="base-url-field" hidden>
         <span class="label">接口地址</span>
-        <input id="llm-base-url" type="url" placeholder="https://api.example.com/v1" autocomplete="off">
+        <input id="llm-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off">
       </label>
+      <p class="note" id="base-url-note" hidden>在服务商的 API 文档里找「Base URL」。常见的有：OpenAI <code>https://api.openai.com/v1</code>；DeepSeek <code>https://api.deepseek.com/v1</code>；通义千问 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>；Kimi <code>https://api.moonshot.cn/v1</code>；智谱 <code>https://open.bigmodel.cn/api/paas/v4</code>。</p>
       <label class="field">
         <span class="label">模型</span>
         <input id="llm-model" type="text" required autocomplete="off">

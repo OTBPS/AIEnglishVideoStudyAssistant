@@ -54,13 +54,15 @@ class LlmSettingsService:
     ) -> LlmConfig:
         model, base_url = model.strip(), base_url.strip()
         if not model:
-            raise InvalidInputError("model name is required")
+            raise InvalidInputError("请填写模型名称。")
         if provider == "openai_compatible" and not base_url.startswith("https://"):
-            raise InvalidInputError("an OpenAI-compatible provider needs an https:// base URL")
+            raise InvalidInputError(
+                "请填写接口地址（以 https:// 开头），例如 OpenAI 官方是 https://api.openai.com/v1。"
+            )
         if api_key is not None:
             key = api_key.strip()
             if not key or any(c.isspace() for c in key):
-                raise InvalidInputError("the API key looks malformed")
+                raise InvalidInputError("API 密钥格式不对：请检查是否多复制了空格或换行。")
             self._secrets.set(secret_name(provider), key)
         self._settings.update(llm_provider=provider, llm_model=model, llm_base_url=base_url)
         return self.config()
