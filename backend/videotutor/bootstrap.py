@@ -107,6 +107,12 @@ class Application:
             raise RuntimeError("application not started")
         return self._vocabulary
 
+    @property
+    def review(self) -> ReviewService:
+        if self._review is None:
+            raise RuntimeError("application not started")
+        return self._review
+
     def _database_read_only(self) -> bool:
         return self._db is not None and self._db.read_only
 
@@ -294,6 +300,7 @@ def smoke_test(product: Product, locations: Locations) -> int:
             problems.append("task supervisor round trip failed")
         problems += _smoke_database(app.videos)
         problems += _smoke_learning(app.vocabulary, product.name)
+        problems += _smoke_review(app.review)
         if not locations.icon_file.exists():
             problems.append(f"missing {locations.icon_file}")
     finally:
@@ -351,3 +358,15 @@ def _smoke_learning(vocabulary: VocabularyService, app_name: str) -> list[str]:
     finally:
         store.delete("probe")
     return problems
+
+
+def _smoke_review(review: ReviewService) -> list[str]:
+    """Collecting a word creates a scheduled card (FSRS bundled and working)."""
+    from videotutor.domain.video import Platform, VideoRef
+    from videotutor.domain.vocab import WordStatus
+
+    review.set_word_status("hi", WordStatus.LEARNING, VideoRef(Platform.YOUTUBE, "smoketest00"))
+    summary = review.summary()
+    if (summary.total, summary.due) != (1, 1):
+        return [f"review card not scheduled: {summary!r}"]
+    return []

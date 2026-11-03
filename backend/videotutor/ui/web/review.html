@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VideoTutor · 练习</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="review.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="sub"><a href="/ui/">← VideoTutor 主页</a></p>
+    <h1 id="page-title">今日复习</h1>
+    <p class="status" id="status"></p>
+  </header>
+
+  <section class="step" id="comprehension" hidden>
+    <h2>理解题</h2>
+    <p class="note">用英文（或中文）回答看视频前的问题，AI 会对照视频内容给出反馈。</p>
+    <ol id="questions" class="questions"></ol>
+  </section>
+
+  <section class="step" id="practice">
+    <h2 id="practice-title">单词练习</h2>
+    <div id="exercise"></div>
+  </section>
+</main>
+<script src="review.js"></script>
+</body>
+</html>

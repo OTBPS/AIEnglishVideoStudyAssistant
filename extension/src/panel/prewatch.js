@@ -88,5 +88,11 @@ export function renderPrewatch(el, state, handlers) {
     idle: !guide && h("button", { text: "生成课前预习", onclick: handlers.generate }),
   }[state.status];
 
-  el.replaceChildren(h("h2", { text: "课前" }), status || "", ...parts);
+  const after = h(
+    "div",
+    { class: "pw-after" },
+    h("span", { class: "muted", text: "看完以后：" }),
+    h("button", { class: "small", text: "课后测验", onclick: handlers.quiz }),
+  );
+  el.replaceChildren(h("h2", { text: "课前" }), status || "", ...parts, after);
 }

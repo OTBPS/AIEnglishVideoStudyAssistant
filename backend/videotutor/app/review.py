@@ -50,6 +50,7 @@ class ExerciseView:
 
 @dataclass(frozen=True)
 class AnswerResult:
+    lemma: str  # revealed only now: for spelling, the word is the answer
     grade: Grade
     correct_answer: str
     feedback_zh: str
@@ -157,7 +158,7 @@ class ReviewService:
         grade, feedback = self._exercises.grade(ex, answer)
 
         now = self._now()
-        result = AnswerResult(grade, ex.answer, feedback, None, False)
+        result = AnswerResult(ex.lemma, grade, ex.answer, feedback, None, False)
         card = self._cards.get(ex.lemma)  # may have been retired meanwhile
         if card is not None:
             srs = self._srs.review(card.srs, grade, now)

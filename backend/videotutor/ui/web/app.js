@@ -109,6 +109,16 @@ async function setupLevel() {
   $("auto-prewatch").onchange = (ev) => save({ auto_prewatch: ev.target.checked });
 }
 
+// ------------------------------------------------------------ review
+async function setupReview() {
+  const s = await getJson("/api/review/summary");
+  if (!s.total) return; // nothing collected yet: the section would only be noise
+  $("review-summary").textContent =
+    `待复习 ${s.due} 个 · 共 ${s.total} 个单词在学 · 今天已练习 ${s.reviewed_today} 次`;
+  $("review-start").textContent = s.due ? `开始复习（${s.due}）` : "提前练习";
+  $("review-section").hidden = false;
+}
+
 // ------------------------------------------------------------ recent videos
 function minutes(ms) {
   return Math.max(0, Math.round(ms / 60000));
@@ -153,7 +163,7 @@ async function init() {
       status.textContent = "学习数据来自更新版本的 VideoTutor，当前为只读。请安装最新版。";
       status.className = "status err";
     }
-    await Promise.all([setupLlm(), setupLevel()]);
+    await Promise.all([setupLlm(), setupLevel(), setupReview()]);
     renderRecent(await getJson("/api/videos/recent?limit=10"));
   } catch (err) {
     status.textContent = "无法连接本地服务，请确认 VideoTutor 正在运行（任务栏右下角托盘图标）。";

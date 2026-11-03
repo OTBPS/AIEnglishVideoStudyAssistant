@@ -45,6 +45,11 @@ core/               只依赖标准库：产品信息、状态机、任务管理
 | `app/vocabulary.py` | 某视频对当前学习者的词汇画像（每段字幕的词、人名、覆盖率）；标记词状态 | — |
 | `app/prewatch.py` | 课前预习：一次 AI 调用生成释义和问题，作为后台任务运行，结果入库；单词点查 | 知道用的是哪家 AI |
 | `app/llm_settings.py` | AI 服务配置：保存模型和密钥、连通测试 | 保存密钥明文 |
+| `domain/review.py` | 卡片与调度状态；题型阶梯（认义 → 拼写 → 回忆 → 造句）按记忆稳定度升降；拼写判分；毕业条件 | 调度算法细节 |
+| `app/review.py` | 收藏即建卡、复习/课后会话、FSRS 排期、毕业为「认识」；练习题答案只留在服务端 | 出题判分细节 |
+| `app/exercises.py` | 由卡片出题（取释义、干扰项、挖空）与判分 | — |
+| `app/grading.py` / `app/comprehension.py` | AI 判分（统一三档）；课后理解题批改 | — |
+| `infra/srs.py` | FSRS（py-fsrs）实现 `SpacedRepetition` 端口 | — |
 | `infra/lexicon.py` | 读取内置英文词表（`tools/build_lexicon.py` 生成） | — |
 | `infra/llm/` | `ClaudeLanguageModel`（官方 SDK、结构化输出、拒答回退）、`OpenAICompatibleLanguageModel`、按配置构建的 provider | 提示词和业务校验 |
 | `infra/secrets.py` | API 密钥存 Windows 凭据管理器 | 写文件或日志 |

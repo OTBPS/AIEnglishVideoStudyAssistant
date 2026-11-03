@@ -1,7 +1,7 @@
 // Side panel controller: follows the active tab, loads transcript + vocabulary +
 // pre-watch material from the desktop app, highlights the line being spoken,
 // and lets the learner look up and mark words.
-import { api } from "./backend.js";
+import { api, appUrl } from "./backend.js";
 import { renderPrewatch, renderSummary } from "./panel/prewatch.js";
 import { openWordPopover, renderTranscript, wordClass } from "./panel/transcript.js";
 import { findSegmentIndex } from "./lib/timeline.js";
@@ -138,7 +138,7 @@ async function loadPrewatch() {
   if (!r.ok) return;
   prewatch = r.data;
   for (const w of prewatch.words) if (w.gloss) glossCache.set(w.word.lemma, w.gloss);
-  renderPrewatch(el.prewatch, prewatch, { mark, generate });
+  renderPrewatch(el.prewatch, prewatch, { mark, generate, quiz });
   if (prewatch.status === "running") pollTimer = setTimeout(loadPrewatch, PREWATCH_POLL_MS);
 }
 
@@ -146,15 +146,22 @@ async function generate() {
   const r = await api(`${videoPath()}/prewatch`, { method: "POST", body: { auto: false } });
   if (r.ok) {
     prewatch = r.data;
-    renderPrewatch(el.prewatch, prewatch, { mark, generate });
+    renderPrewatch(el.prewatch, prewatch, { mark, generate, quiz });
   }
   pollTimer = setTimeout(loadPrewatch, PREWATCH_POLL_MS);
+}
+
+// Post-watch quiz: the app's review page, in a tab next to the video.
+async function quiz() {
+  const url = await appUrl(`/ui/review.html?platform=${enc(current.platform)}&id=${enc(current.externalId)}`);
+  if (url) chrome.tabs.create({ url });
 }
 
 // ------------------------------------------------------------ words
 async function mark(lemma, status) {
   el.pop.hidden = true;
-  const r = await api(`/api/words/${enc(lemma)}`, { method: "PUT", body: { status } });
+  const body = { status, platform: current.platform, external_id: current.externalId };
+  const r = await api(`/api/words/${enc(lemma)}`, { method: "PUT", body });
   if (!r.ok) return;
   await Promise.all([refreshVocabulary(), loadPrewatch()]);
 }

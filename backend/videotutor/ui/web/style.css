@@ -78,3 +78,8 @@ button:disabled { opacity: .6; cursor: progress; }
 
 /* The hidden attribute must win over the display rules above. */
 [hidden] { display: none !important; }
+
+a.button {
+  display: inline-block; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  border-radius: 8px; padding: 6px 14px; text-decoration: none;
+}

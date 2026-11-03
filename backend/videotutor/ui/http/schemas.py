@@ -235,6 +235,7 @@ class AnswerIn(BaseModel):
 
 
 class AnswerOut(BaseModel):
+    lemma: str
     grade: Literal["again", "hard", "good", "easy"]
     correct_answer: str
     feedback_zh: str

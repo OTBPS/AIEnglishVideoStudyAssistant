@@ -50,6 +50,12 @@ export async function discover() {
   return { state: "offline" };
 }
 
+// Absolute URL of a page served by the app, or null when it is not running.
+export async function appUrl(path) {
+  if (knownPort === null && (await discover()).state !== "connected") return null;
+  return `http://127.0.0.1:${knownPort}${path}`;
+}
+
 // Call the app. Resolves to {ok: true, data} or {ok: false, status, detail};
 // never throws, so callers can show a state instead of crashing.
 export async function api(path, { method = "GET", body } = {}) {

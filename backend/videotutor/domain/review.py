@@ -158,10 +158,16 @@ def grade_spelling(exercise: Exercise, typed: str, lexicon: Lexicon) -> Grade:
 
 
 def _edit_distance(a: str, b: str) -> int:
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i]
-        for j, cb in enumerate(b, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
-        prev = cur
-    return prev[-1]
+    """Optimal-string-alignment distance: an adjacent swap ("durabel") is one slip."""
+    d = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a) + 1):
+        d[i][0] = i
+    for j in range(len(b) + 1):
+        d[0][j] = j
+    for i in range(1, len(a) + 1):
+        for j in range(1, len(b) + 1):
+            cost = int(a[i - 1] != b[j - 1])
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[len(a)][len(b)]

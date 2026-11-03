@@ -98,3 +98,5 @@ button.small:hover { border-color: var(--accent); color: var(--accent); }
 
 /* The hidden attribute must win over the display rules above. */
 [hidden] { display: none !important; }
+
+.pw-after { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); display: flex; gap: 8px; align-items: center; }

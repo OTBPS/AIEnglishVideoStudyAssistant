@@ -111,6 +111,7 @@ def test_grading_choice_and_spelling() -> None:
     assert grade_spelling(spell, " Revisited ", LEXICON) is Grade.GOOD
     assert grade_spelling(spell, "revisit", LEXICON) is Grade.HARD  # right word, wrong form
     assert grade_spelling(spell, "revisitd", LEXICON) is Grade.HARD  # one slip
+    assert grade_spelling(spell, "revsiited", LEXICON) is Grade.HARD  # adjacent letters swapped
     assert grade_spelling(spell, "review", LEXICON) is Grade.AGAIN
     assert grade_spelling(spell, "  ", LEXICON) is Grade.AGAIN
 

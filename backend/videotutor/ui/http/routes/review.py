@@ -71,6 +71,7 @@ def router(
         )
         res = await asyncio.wrap_future(handle.future)
         return AnswerOut(
+            lemma=res.lemma,
             grade=res.grade.value,
             correct_answer=res.correct_answer,
             feedback_zh=res.feedback_zh,
